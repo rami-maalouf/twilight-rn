@@ -22,7 +22,7 @@ function RootContent() {
   const theme = getTheme(appearance, useColorScheme());
 
   useEffect(() => {
-    Appearance.setColorScheme(appearance.themeMode === "System" ? null : appearance.themeMode === "Sunset" ? "light" : "dark");
+    Appearance.setColorScheme(appearance.themeMode === "System" ? "unspecified" : appearance.themeMode === "Sunset" ? "light" : "dark");
   }, [appearance.themeMode]);
 
   useEffect(() => {
