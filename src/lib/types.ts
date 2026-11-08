@@ -126,6 +126,7 @@ export type SleepAlignmentScorePoint = {
   dailyScore: number;
   trendScore: number;
   coreScore: number;
+  coreTrendScore: number;
   durationScore: number;
   timingScore: number;
   phaseScore: number;

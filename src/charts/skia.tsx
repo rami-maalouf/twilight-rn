@@ -469,7 +469,7 @@ export function WeeklySleepWindowChart({
   );
 }
 
-export function DurationMomentumChart({ series, targetHours }: { series: SleepMovingAveragePoint[]; targetHours: number }) {
+export function DurationMomentumChart({ series, targetHours, window = 7 }: { series: SleepMovingAveragePoint[]; targetHours: number; window?: number }) {
   const { theme } = useTwilightTheme();
   const palette = chartPalette(theme);
   const [selected, setSelected] = useState<number | null>(null);
@@ -478,9 +478,9 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
 
   if (displayPoints.length === 0) return null;
 
-  const pointToDisplay = selected != null ? displayPoints[selected] : displayPoints[displayPoints.length - 1];
+  const pointToDisplay = selected != null ? (displayPoints[selected] ?? displayPoints[displayPoints.length - 1]) : displayPoints[displayPoints.length - 1];
   const selectedIndex = displayPoints.findIndex(p => p.date.getTime() === pointToDisplay.date.getTime());
-  const point7dAgo = selectedIndex >= 7 ? displayPoints[selectedIndex - 7] : null;
+  const point7dAgo = selectedIndex >= window ? displayPoints[selectedIndex - window] : null;
 
   const currentAvg = pointToDisplay.movingAverageHours!;
   const prevAvg = point7dAgo?.movingAverageHours ?? currentAvg;
@@ -503,14 +503,14 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
     Math.min(targetHours - 0.5, Math.floor(minRange * 2) / 2),
     Math.max(targetHours + 0.5, Math.ceil(maxRange * 2) / 2)
   ];
-  const yTicks = [];
+  const yTicks: number[] = [];
   for (let i = yDomain[0]; i <= yDomain[1]; i += 0.5) yTicks.push(i);
 
   return (
     <View style={{ gap: 6 }}>
       <View style={{ flexDirection: "row", gap: 7 }}>
         <InsightPill 
-          title="VS 7D AGO" 
+          title={`VS ${window} NIGHTS AGO`}
           value={formatSignedHours(delta7d)} 
           subtitle={Math.abs(delta7d) < 0.1 ? "Stable" : (delta7d > 0 ? "Improving" : "Declining")} 
           tint={deltaColor} 
@@ -545,7 +545,7 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
 
           return (
             <Group>
-              <AxisGrid frame={frame} yTicks={yTicks} yDomain={yDomain} suffix="h" />
+              <AxisGrid frame={frame} yTicks={yTicks} yDomain={yDomain} />
 
               {/* Target rule mark */}
               {(() => {
@@ -827,11 +827,9 @@ export function SleepAlignmentChart({
   const [selected, setSelected] = useState<number | null>(null);
 
   const displayPoints = useMemo(() => {
-    let previousTrend: number | null = null;
     return series.map((point) => {
       const daily = coreOnly ? point.coreScore : point.dailyScore;
-      const trend = previousTrend != null ? 0.8 * previousTrend + 0.2 * daily : daily;
-      previousTrend = trend;
+      const trend = coreOnly ? point.coreTrendScore : point.trendScore;
       return {
         ...point,
         displayDaily: Math.round(daily),
@@ -868,7 +866,7 @@ export function SleepAlignmentChart({
 
   if (displayPoints.length === 0) return null;
 
-  const pointToDisplay = selected != null ? displayPoints[selected] : displayPoints[displayPoints.length - 1];
+  const pointToDisplay = selected != null ? (displayPoints[selected] ?? displayPoints[displayPoints.length - 1]) : displayPoints[displayPoints.length - 1];
   const prevPointIndex = selected != null ? selected - 1 : displayPoints.length - 2;
   const prevPoint = displayPoints[prevPointIndex];
   const selectedDailyDelta = prevPoint ? pointToDisplay.displayDaily - prevPoint.displayDaily : 0;
@@ -884,7 +882,7 @@ export function SleepAlignmentChart({
     components.splice(1, 0, { title: "Timing", score: pointToDisplay.timingScore, tint: palette.green });
     components.splice(2, 0, { title: "Phase", score: pointToDisplay.phaseScore, tint: palette.indigo });
   }
-  const weakestComponent = components.reduce((min, c) => c.score < min.score ? c : min, components[0]);
+  const weakestComponent = components.filter(component => component.score > 1).reduce((min, component) => component.score < min.score ? component : min, { title: "None", score: 100, tint: palette.green });
 
   const MetricBar = ({ label, value, color }: { label: string; value: number; color: string }) => (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 }}>
@@ -1140,7 +1138,7 @@ function NativeTimeControl({
           display="compact"
           minuteInterval={5}
           accentColor={color}
-          onValueChange={(date) => {
+          onValueChange={(_event, date) => {
             if (date) onChange(minutesFromDate(date));
           }}
         />
@@ -1166,7 +1164,7 @@ function NativeTimeControl({
               mode="time"
               display="spinner"
               minuteInterval={5}
-              onValueChange={(date) => {
+              onValueChange={(_event, date) => {
                 if (date) onChange(minutesFromDate(date));
               }}
               onDismiss={() => setShowAndroidPicker(false)}

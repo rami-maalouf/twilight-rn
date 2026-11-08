@@ -15,9 +15,11 @@ export default function MetricsGuideModal() {
             "Sleep consistency measures bedtime stability.",
             "Wake consistency measures wake-time stability.",
             "Accuracy compares actual bedtime and wake time with your configured targets.",
-            "Moving averages smooth short-term noise into a more useful trend.",
-            "Sleep debt accumulates the gap between your goal duration and actual sleep each night.",
-            "Alignment score blends duration, timing, phase, and consistency into the SwiftUI-style score chart.",
+            "Trend shows a 7-night or monthly (30-night) moving average. History is calculated before applying display ranges.",
+            "Time shows sleep, wake, or both, with 7-night averages and target differences.",
+            "SRI measures adjacent noon-to-noon sleep and awake agreement across 7, 14, or 28 days. Naps count, overlaps are merged, and missing or daylight-saving days remain gaps. Unlogged time on recorded days is assumed awake.",
+            "Recovery accumulates actual sleep minus your target: negative is debt, positive is credit.",
+            "Alignment combines asymmetric duration penalties, sleep-window overlap, midpoint phase, and consistency using weighted geometric scores. Components at or below 1% are excluded.",
           ].map((item) => (
             <Text key={item} style={{ color: theme.textPrimary, fontSize: 15, lineHeight: 23 }}>
               • {item}
