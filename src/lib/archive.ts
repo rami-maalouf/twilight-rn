@@ -1,39 +1,14 @@
+import { validateArchive } from "./health/archive-validation";
+import { enqueue } from "./health/model";
+import { getDb, getKeyValue, setKeyValue, localTransaction, readHealthState, writeHealthState, sessionsIn, writeSession } from "./db";
 import { APP_VERSION, ARCHIVE_TYPE, CURRENT_ARCHIVE_SCHEMA_VERSION } from "@/lib/constants";
-import {
-  clearAllData,
-  getAppState,
-  getAppearance,
-  getHydratedState,
-  getSessions,
-  getSleepSettings,
-  setAppState,
-  setAppearance,
-  setDemoRestoreState,
-  setSleepSettings,
-  upsertSession,
-} from "@/lib/db";
-import { parseJson, serializeJson } from "@/lib/format";
+import { getSessions, getSleepSettings, getAppearance, getHydratedState } from "@/lib/db";
+import { serializeJson } from "@/lib/format";
 import type {
-  AppearanceSettings,
   ArchivePayload,
   SleepSession,
   DataArchivePreview,
 } from "@/lib/types";
-
-function normalizeSession(rawSession: Record<string, unknown>): SleepSession {
-  return {
-    id: String(rawSession.id),
-    tag: String(rawSession.tag ?? "Manual Log"),
-    startTime: String(rawSession.startTime),
-    endTime: rawSession.endTime == null ? null : String(rawSession.endTime),
-    startTimeZoneIdentifier:
-      rawSession.startTimeZoneIdentifier == null ? null : String(rawSession.startTimeZoneIdentifier),
-    endTimeZoneIdentifier:
-      rawSession.endTimeZoneIdentifier == null ? null : String(rawSession.endTimeZoneIdentifier),
-    needsHealthKitSync: Boolean(rawSession.needsHealthKitSync ?? true),
-    healthKitSyncVersion: Number(rawSession.healthKitSyncVersion ?? 2),
-  };
-}
 
 export async function exportArchiveJson() {
   const [sessions, sleepSettings, appearance] = await Promise.all([
@@ -58,14 +33,15 @@ export async function exportArchiveJson() {
   return JSON.stringify(payload, null, 2);
 }
 
-export async function previewArchiveImport(payload: ArchivePayload): Promise<DataArchivePreview> {
+export async function previewArchiveImport(input: unknown): Promise<DataArchivePreview> {
+  const payload = validateArchive(input);
   const current = await getHydratedState();
   const currentSessions = new Map(current.sessions.map((session) => [session.id, serializeJson(session)]));
 
   let newSessions = 0;
   let updatedSessions = 0;
   for (const rawSession of payload.sessions) {
-    const normalized = normalizeSession(rawSession as Record<string, unknown>);
+    const normalized = rawSession;
     const currentPayload = currentSessions.get(normalized.id);
     if (!currentPayload) {
       newSessions += 1;
@@ -88,60 +64,69 @@ export async function previewArchiveImport(payload: ArchivePayload): Promise<Dat
   };
 }
 
-export async function importArchivePayload(payload: ArchivePayload) {
-  const backupArchiveJson = await exportArchiveJson();
-
-  for (const rawSession of payload.sessions) {
-    await upsertSession(normalizeSession(rawSession as Record<string, unknown>));
-  }
-
-  await setSleepSettings(payload.sleepSettings);
-  await setAppearance({
-    themeMode: payload.appearance.themeMode as AppearanceSettings["themeMode"],
-    colorPalette: payload.appearance.colorPalette as AppearanceSettings["colorPalette"],
+export async function importArchivePayload(input: unknown) {
+  const payload = validateArchive(input);
+  const preview = await previewArchiveImport(payload);
+  await localTransaction(async db => {
+    if (await getKeyValue(db, 'demo_restore_state', 'isDemoActive', false)) throw new Error('Exit demo mode before importing.');
+    const before = await snapshot(db);
+    const combined = new Map((await sessionsIn(db)).map(s => [s.id, s]));
+    for (const session of payload.sessions) combined.set(session.id, session);
+    if ([...combined.values()].filter(s => !s.endTime).length > 1) throw new Error('Import would create multiple active sessions. Finish the current session first.');
+    await setKeyValue(db, 'health_state', 'safetyBackup', JSON.stringify(before));
+    const health = await readHealthState(db);
+    for (const session of payload.sessions) { await writeSession(db, session); enqueue(health, session, 'upsert'); }
+    await writeHealthState(db, health);
+    await writeSettings(db, payload);
   });
-  await setAppState({
-    ...(await getAppState()),
-    pendingExternalAction: null,
-  });
-  await setDemoRestoreState({
-    backupArchiveJson,
-    backupCreatedAt: new Date().toISOString(),
-    isDemoActive: false,
-  });
-
-  return {
-    preview: await previewArchiveImport(payload),
-    automaticBackupJson: backupArchiveJson,
-  };
+  return { preview };
 }
-
-export async function importArchiveJson(json: string) {
-  const payload = parseJson<ArchivePayload | null>(json, null);
-  if (!payload) {
-    throw new Error("The selected file could not be parsed.");
-  }
-  if (payload.metadata?.archiveType !== ARCHIVE_TYPE) {
-    throw new Error("This file is not a Twilight full backup.");
-  }
-  return importArchivePayload(payload);
+export async function importArchiveJson(json: string) { return importArchivePayload(JSON.parse(json)); }
+const tables = ['sessions', 'sleep_settings', 'appearance_settings', 'app_state', 'health_state'] as const;
+export async function snapshot(db: Awaited<ReturnType<typeof getDb>>) {
+  const result: Record<string, Record<string, unknown>[]> = {};
+  for (const table of tables) result[table] = await db.getAllAsync(`SELECT * FROM ${table}${table === 'health_state' ? " WHERE key != 'safetyBackup'" : ''}`);
+  return result;
 }
-
-export async function restoreFromBackupJson(json: string) {
-  const payload = parseJson<ArchivePayload | null>(json, null);
-  if (!payload) throw new Error("Restore backup was unreadable.");
-  await clearAllData();
-  for (const rawSession of payload.sessions) {
-    await upsertSession(normalizeSession(rawSession as Record<string, unknown>));
+export async function restoreSnapshot(db: Awaited<ReturnType<typeof getDb>>, data: Awaited<ReturnType<typeof snapshot>>) {
+  for (const table of tables) {
+    await db.runAsync(`DELETE FROM ${table}${table === 'health_state' ? " WHERE key != 'safetyBackup'" : ''}`);
+    for (const row of data[table]) {
+      const columns = Object.keys(row);
+      await db.runAsync(`INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`, Object.values(row) as (string | null)[]);
+    }
   }
-  await setSleepSettings(payload.sleepSettings);
-  await setAppearance({
-    themeMode: payload.appearance.themeMode as AppearanceSettings["themeMode"],
-    colorPalette: payload.appearance.colorPalette as AppearanceSettings["colorPalette"],
+}
+export async function writeSettings(db: Awaited<ReturnType<typeof getDb>>, payload: ReturnType<typeof validateArchive>) {
+  for (const [table, settings] of [['sleep_settings', payload.sleepSettings], ['appearance_settings', payload.appearance]] as const) {
+    for (const [key, value] of Object.entries(settings)) {
+      if (key !== 'healthSyncEnabled') await setKeyValue(db, table, key, JSON.stringify(value));
+    }
+  }
+}
+export async function restoreSafetyBackup() {
+  await localTransaction(async db => {
+    if (await getKeyValue(db, 'demo_restore_state', 'isDemoActive', false)) throw new Error('Exit demo first.');
+    const backup = await getKeyValue<Awaited<ReturnType<typeof snapshot>> | null>(db, 'health_state', 'safetyBackup', null);
+    if (!backup) throw new Error('No pre-import backup is available.');
+    const current = await snapshot(db);
+    // remote writes may have happened since import: retain their delete intent.
+    const currentHealth = await readHealthState(db);
+    await restoreSnapshot(db, backup);
+    const health = await readHealthState(db);
+    const restored = await sessionsIn(db);
+    for (const session of (current.sessions.map(r => JSON.parse(r.payload as string)) as SleepSession[])) if (!restored.some(s => s.id === session.id)) enqueue(currentHealth, session, 'delete');
+    health.versions = { ...health.versions, ...currentHealth.versions };
+    health.outbox = { ...health.outbox, ...currentHealth.outbox };
+    for (const session of restored) enqueue(health, session, 'upsert');
+    health.token = null;
+    await writeHealthState(db, health);
   });
-  await setDemoRestoreState({
-    backupArchiveJson: null,
-    backupCreatedAt: null,
-    isDemoActive: false,
-  });
+}
+export async function exportSafetyBackup() {
+  const db = await getDb();
+  const data = await getKeyValue<Awaited<ReturnType<typeof snapshot>> | null>(db, 'health_state', 'safetyBackup', null);
+  if (!data) throw new Error('No pre-import backup is available.');
+  const settings = (table: string) => Object.fromEntries(data[table].map(r => [r.key, JSON.parse(r.value as string)]));
+  return JSON.stringify({ metadata: { archiveType: ARCHIVE_TYPE, schemaVersion: CURRENT_ARCHIVE_SCHEMA_VERSION, exportedAt: new Date().toISOString(), timeZoneIdentifier: 'UTC', appVersion: APP_VERSION }, sessions: data.sessions.map(r => JSON.parse(r.payload as string)), sleepSettings: settings('sleep_settings'), appearance: settings('appearance_settings') }, null, 2);
 }

@@ -1,3 +1,4 @@
+import { emptyHealthState, enqueue, imported, type HealthState } from "./health/model";
 import * as SQLite from "expo-sqlite";
 
 import {
@@ -151,6 +152,7 @@ async function migrate(db: SQLite.SQLiteDatabase) {
     );
   `);
 
+  await db.execAsync(`CREATE TABLE IF NOT EXISTS health_state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL); PRAGMA user_version = 2;`);
   await seedKeyValueTable(db, "sleep_settings", DEFAULT_SLEEP_SETTINGS);
   await seedKeyValueTable(db, "appearance_settings", DEFAULT_APPEARANCE);
   await seedKeyValueTable(db, "app_state", DEFAULT_APP_STATE);
@@ -198,8 +200,7 @@ export async function getSessions() {
   );
 }
 
-export async function upsertSession(session: SleepSession) {
-  const db = await getDb();
+export async function writeSession(db: SQLite.SQLiteDatabase, session: SleepSession) {
   await db.runAsync(
     `INSERT INTO sessions (id, start_time, end_time, payload)
      VALUES (?, ?, ?, ?)
@@ -216,10 +217,48 @@ export async function upsertSession(session: SleepSession) {
   );
 }
 
-export async function deleteSession(sessionId: string) {
-  const db = await getDb();
-  await db.runAsync("DELETE FROM sessions WHERE id = ?", [sessionId]);
+let transactionQueue: Promise<unknown> = Promise.resolve();
+export function localTransaction<T>(action: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  const run = transactionQueue.then(async () => {
+    const db = await getDb();
+    let value: T;
+    await db.withExclusiveTransactionAsync(async tx => { value = await action(tx); });
+    return value!;
+  });
+  transactionQueue = run.catch(() => undefined);
+  return run;
 }
+export async function readHealthState(db: SQLite.SQLiteDatabase): Promise<HealthState> {
+  return getKeyValue(db, "health_state", "sync", emptyHealthState());
+}
+export async function writeHealthState(db: SQLite.SQLiteDatabase, state: HealthState) {
+  await setKeyValue(db, "health_state", "sync", JSON.stringify(state));
+}
+export async function sessionsIn(db: SQLite.SQLiteDatabase): Promise<SleepSession[]> {
+  return (await db.getAllAsync<SessionRow>("SELECT id, payload FROM sessions")).map(r => JSON.parse(r.payload));
+}
+export async function upsertSession(session: SleepSession) {
+  await localTransaction(async db => {
+    const demo = await getKeyValue(db, "demo_restore_state", "isDemoActive", false);
+    const old = (await sessionsIn(db)).find(s => s.id === session.id);
+    if (old && imported(old)) session = { ...session, isHealthKitImported: false, healthProvenance: old.healthProvenance ? { ...old.healthProvenance, adopted: true } : { platform: 'apple', source: old.healthKitSourceBundleIdentifier ?? 'Apple Health', recordIds: [], adopted: true } };
+    await writeSession(db, session);
+    if (!demo) { const state = await readHealthState(db); enqueue(state, session, 'upsert'); await writeHealthState(db, state); }
+  });
+}
+export async function deleteSession(sessionId: string) {
+  await localTransaction(async db => {
+    const session = (await sessionsIn(db)).find(s => s.id === sessionId);
+    if (!session) return;
+    if (!await getKeyValue(db, "demo_restore_state", "isDemoActive", false)) {
+      const state = await readHealthState(db);
+      state.tombstones = [...new Set([...state.tombstones, ...(session.healthProvenance?.recordIds ?? [])])];
+      enqueue(state, session, 'delete'); await writeHealthState(db, state);
+    }
+    await db.runAsync("DELETE FROM sessions WHERE id = ?", [sessionId]);
+  });
+}
+export { getKeyValue, setKeyValue };
 
 export async function getSleepSettings(): Promise<SleepSettings> {
   const db = await getDb();

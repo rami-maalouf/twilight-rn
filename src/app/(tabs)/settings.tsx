@@ -5,6 +5,7 @@ import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   AppState,
   Linking,
   Platform,
@@ -475,11 +476,19 @@ export default function SettingsRoute() {
             }
           />
           <SettingsNavRow
-            title="Import & Export Data"
-            subtitle="Back up or restore your sleep history."
-            icon="download-outline"
-            onPress={() => router.push("/modals/data-management")}
+            title="Health Connect"
+            subtitle="Sleep permissions and sync status"
+            icon="heart-outline"
+            onPress={() => router.push("/modals/health-connect")}
           />
+          {!isDemoMode ? (
+            <SettingsNavRow
+              title="Import & Export Data"
+              subtitle="Back up or restore your sleep history."
+              icon="download-outline"
+              onPress={() => router.push("/modals/data-management")}
+            />
+          ) : null}
         </SettingsRowGroup>
       </GlassPanel>
 
@@ -504,7 +513,12 @@ export default function SettingsRoute() {
           />
           <TwilightButton
             title="Exit Demo and Restore Previous Data"
-            onPress={() => void exitDemoMode()}
+            onPress={() =>
+              Alert.alert("Exit demo?", "Restore your exact personal data and settings?", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Restore", onPress: () => void perform(exitDemoMode) },
+              ])
+            }
           />
         </GlassPanel>
       ) : null}

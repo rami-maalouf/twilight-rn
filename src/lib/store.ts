@@ -1,3 +1,4 @@
+import { syncHealth } from "./health/sync";
 import { create } from "zustand";
 
 import {
@@ -48,6 +49,7 @@ type AppStore = HydratedAppState & {
 async function afterDataMutation(set: (state: Partial<AppStore>) => void) {
   const next = await getHydratedState();
   set(next);
+  void syncHealth();
 }
 
 function setError(set: (state: Partial<AppStore>) => void, currentErrorMessage: string) {
@@ -84,6 +86,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const hydrated = await getHydratedState();
       set(hydrated);
+      void syncHealth();
     } catch (error) {
       set({
         ready: true,
@@ -121,6 +124,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   async updateSleepSettings(partial) {
     const sleepSettings = await setSleepSettings(partial);
     set({ sleepSettings });
+    void syncHealth();
     await scheduleWindDownReminder(sleepSettings);
   },
 
