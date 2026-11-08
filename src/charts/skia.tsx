@@ -558,7 +558,7 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
 
               {/* Area Fill */}
               {(() => {
-                const areaPath = Skia.Path.Make();
+                const areaPath = Skia.PathBuilder.Make();
                 displayPoints.forEach((point, index) => {
                   const x = bounds.left + slot * index + slot / 2;
                   const y = linearScale(point.movingAverageHours!, yDomain, [bounds.bottom, bounds.top]);
@@ -576,7 +576,7 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
                 const ratio = Math.max(0, Math.min(1, (targetY - bounds.top) / bounds.height));
                 
                 return (
-                  <Path path={areaPath}>
+                  <Path path={areaPath.detach()}>
                     <LinearGradient
                       start={vec(0, bounds.top)}
                       end={vec(0, bounds.bottom)}
@@ -594,14 +594,14 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
 
               {/* Trend Line */}
               {(() => {
-                const linePath = Skia.Path.Make();
+                const linePath = Skia.PathBuilder.Make();
                 displayPoints.forEach((point, index) => {
                   const x = bounds.left + slot * index + slot / 2;
                   const y = linearScale(point.movingAverageHours!, yDomain, [bounds.bottom, bounds.top]);
                   if (index === 0) linePath.moveTo(x, y);
                   else linePath.lineTo(x, y);
                 });
-                return <Path path={linePath} color={palette.cyan} style="stroke" strokeWidth={3} />;
+                return <Path path={linePath.detach()} color={palette.cyan} style="stroke" strokeWidth={3} />;
               })()}
 
               {/* Selected Point Marker */}
@@ -971,14 +971,14 @@ export function SleepAlignmentChart({
 
             {(() => {
                if (displayPoints.length === 0) return null;
-               const path = Skia.Path.Make();
+               const path = Skia.PathBuilder.Make();
                displayPoints.forEach((point, index) => {
                  const x = bounds.left + slot * index + slot / 2;
                  const y = linearScale(point.displayTrend, yDomain, [bounds.bottom, bounds.top]);
                  if (index === 0) path.moveTo(x, y);
                  else path.lineTo(x, y);
                });
-               return <Path path={path} color={palette.cyan} style="stroke" strokeWidth={3} />;
+               return <Path path={path.detach()} color={palette.cyan} style="stroke" strokeWidth={3} />;
             })()}
 
             {(() => {
