@@ -1,3 +1,4 @@
+import { SegmentedControl } from "@expo/ui/community/segmented-control";
 import React, { Fragment } from "react";
 import {
   Pressable,
@@ -217,33 +218,7 @@ export function NativeSegmentedControl<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
-  const { theme } = useTwilightTheme();
-  return (
-    <View style={styles.segmentedControl}>
-      {options.map((option) => {
-        const selected = option === value;
-        return (
-          <Pressable
-            key={option}
-            onPress={() => onChange(option)}
-            style={[
-              styles.segment,
-              selected && { backgroundColor: theme.accent },
-            ]}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                { color: selected ? "#000" : theme.textPrimary },
-              ]}
-            >
-              {option}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
+  return <SegmentedControl values={[...options]} selectedIndex={options.indexOf(value)} onChange={(event) => onChange(options[event.nativeEvent.selectedSegmentIndex])} />;
 }
 
 export function NativePickerRow<T extends string>({

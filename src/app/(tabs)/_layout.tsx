@@ -1,14 +1,14 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { DynamicColorIOS } from "react-native";
+import { useColorScheme, DynamicColorIOS } from "react-native";
 
 import { getTheme } from "@/lib/theme";
 import { useAppStore } from "@/lib/store";
 
 export default function TabsLayout() {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
-  const isSunset = appearance.themeMode === "Sunset";
+  const theme = getTheme(appearance, useColorScheme());
+  const isSunset = theme.textPrimary !== "#F8FAFC";
   const baseNavigationTheme = isSunset ? DefaultTheme : DarkTheme;
   const nativeTintColor =
     process.env.EXPO_OS === "ios"

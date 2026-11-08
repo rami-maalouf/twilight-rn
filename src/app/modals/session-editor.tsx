@@ -1,149 +1,261 @@
-import DateTimePicker from "@react-native-community/datetimepicker";
+import { DateTimePicker } from "@expo/ui/community/datetime-picker";
 import { router, useLocalSearchParams } from "expo-router";
-import { useMemo, useState } from "react";
-import { Text, TextInput } from "react-native";
+import { useRef, useState } from "react";
+import { Text, TextInput, View } from "react-native";
 
-import { SleepWindowDialChart } from "@/charts";
-import { formatClock, formatDay, formatDurationLong, minutesFromDate, startOfDay } from "@/lib/format";
+import { makeSession } from "@/lib/db";
+import { formatClock, formatDurationLong } from "@/lib/format";
+import { resolveWallTime, wallTime, type WallTime } from "@/lib/session-editor";
+import { isValidSession } from "@/lib/sleep";
 import { useAppStore } from "@/lib/store";
+import { NativeSegmentedControl } from "@/ui/native";
 import {
   GlassPanel,
-  MetricCard,
-  MetricGrid,
   NativeScreen,
   SectionHeader,
   TwilightButton,
-  chartPalette,
   useTwilightTheme,
 } from "@/ui/surface";
 
-function applyMinutesToDate(baseDate: Date, totalMinutes: number) {
-  const next = new Date(baseDate);
-  next.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-  return next;
+function Endpoint({
+  title,
+  value,
+  zone,
+  onChange,
+  occurrence,
+  onOccurrenceChange,
+}: {
+  title: string;
+  value: WallTime;
+  zone: string;
+  onChange: (value: WallTime) => void;
+  occurrence: string;
+  onOccurrenceChange: (value: "Ask" | "First" | "Second") => void;
+}) {
+  const { theme } = useTwilightTheme();
+  const [picker, setPicker] = useState<"date" | "time" | null>(null);
+  const date = new Date(`${value.date}T12:00:00`);
+  if (picker === "time") date.setFullYear(2000, 0, 15);
+  if (picker === "time")
+    date.setHours(Math.floor(value.minutes / 60), value.minutes % 60);
+  return (
+    <GlassPanel style={{ gap: 12 }}>
+      <SectionHeader title={title} subtitle={zone} compact />
+      <View style={{ flexDirection: "row", gap: 12 }}>
+        <TwilightButton
+          title={value.date}
+          subtle
+          onPress={() => setPicker("date")}
+        />
+        <TwilightButton
+          title={formatClock(value.minutes)}
+          subtle
+          onPress={() => setPicker("time")}
+        />
+      </View>
+      {picker ? (
+        <DateTimePicker
+          value={date}
+          mode={picker}
+          onDismiss={() => setPicker(null)}
+          onValueChange={(_, next) => {
+            setPicker(null);
+            onChange(
+              picker === "date"
+                ? {
+                    ...value,
+                    date: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`,
+                  }
+                : {
+                    ...value,
+                    minutes: next.getHours() * 60 + next.getMinutes(),
+                  },
+            );
+          }}
+        />
+      ) : null}
+      <Text style={{ color: theme.textSecondary }}>
+        If the clocks repeat this time, choose its occurrence.
+      </Text>
+      <NativeSegmentedControl
+        options={["Ask", "First", "Second"] as const}
+        value={occurrence as "Ask" | "First" | "Second"}
+        onChange={onOccurrenceChange}
+      />
+    </GlassPanel>
+  );
 }
 
 export default function SessionEditorModal() {
   const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
   const sessions = useAppStore((state) => state.sessions);
-  const sleepSettings = useAppStore((state) => state.sleepSettings);
-  const upsertSleepLog = useAppStore((state) => state.upsertSleepLog);
+  const settings = useAppStore((state) => state.sleepSettings);
+  const upsert = useAppStore((state) => state.upsertSleepLog);
   const { theme } = useTwilightTheme();
-  const palette = chartPalette(theme);
-
-  const existing = useMemo(
-    () => sessions.find((session) => session.id === sessionId),
-    [sessionId, sessions],
+  const [existing] = useState(() =>
+    sessions.find((session) => session.id === sessionId),
   );
-
-  const initialWakeDate = existing?.endTime ? new Date(existing.endTime) : applyMinutesToDate(new Date(), sleepSettings.optimalWakeMinutes);
-  const initialSleepDate = existing?.startTime
-    ? new Date(existing.startTime)
-    : (() => {
-        const wakeDay = startOfDay(initialWakeDate);
-        const sleepDay =
-          sleepSettings.optimalSleepMinutes < 12 * 60
-            ? wakeDay
-            : new Date(wakeDay.getTime() - 24 * 60 * 60 * 1000);
-        return applyMinutesToDate(sleepDay, sleepSettings.optimalSleepMinutes);
-      })();
-
-  const [sessionDay, setSessionDay] = useState(startOfDay(initialWakeDate));
-  const [sleepMinutes, setSleepMinutes] = useState(minutesFromDate(initialSleepDate));
-  const [wakeMinutes, setWakeMinutes] = useState(minutesFromDate(initialWakeDate));
+  const [zone] = useState(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
+  const startZone = existing?.startTimeZoneIdentifier ?? zone;
+  const endZone = existing?.endTimeZoneIdentifier ?? startZone;
+  const [end, setEnd] = useState(() =>
+    existing?.endTime
+      ? wallTime(existing.endTime, endZone)
+      : {
+          ...wallTime(new Date().toISOString(), endZone),
+          minutes: settings.optimalWakeMinutes,
+        },
+  );
+  const [start, setStart] = useState(() => {
+    if (existing) return wallTime(existing.startTime, startZone);
+    const date = new Date(`${end.date}T12:00:00Z`);
+    if (settings.optimalSleepMinutes >= end.minutes)
+      date.setUTCDate(date.getUTCDate() - 1);
+    return {
+      date: date.toISOString().slice(0, 10),
+      minutes: settings.optimalSleepMinutes,
+    };
+  });
+  const [startOccurrence, setStartOccurrence] = useState<
+    "Ask" | "First" | "Second"
+  >("Ask");
+  const [endOccurrence, setEndOccurrence] = useState<
+    "Ask" | "First" | "Second"
+  >("Ask");
   const [tag, setTag] = useState(existing?.tag ?? "Manual Log");
-  const [showDatePicker, setShowDatePicker] = useState(false);
-
-  const sleepDate = useMemo(() => {
-    const base = sleepMinutes < 12 * 60 ? sessionDay : new Date(sessionDay.getTime() - 24 * 60 * 60 * 1000);
-    return applyMinutesToDate(base, sleepMinutes);
-  }, [sessionDay, sleepMinutes]);
-
-  const wakeDate = useMemo(() => applyMinutesToDate(sessionDay, wakeMinutes), [sessionDay, wakeMinutes]);
-  const durationSeconds = Math.max(0, (wakeDate.getTime() - sleepDate.getTime()) / 1000);
-  const averageGoalDeviationMinutes = Math.round(
-    (Math.min(Math.abs(sleepMinutes - sleepSettings.optimalSleepMinutes), 24 * 60 - Math.abs(sleepMinutes - sleepSettings.optimalSleepMinutes)) +
-      Math.min(Math.abs(wakeMinutes - sleepSettings.optimalWakeMinutes), 24 * 60 - Math.abs(wakeMinutes - sleepSettings.optimalWakeMinutes))) /
-      2,
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const submitting = useRef(false);
+  const [savedId] = useState(
+    () => existing?.id ?? makeSession("Manual Log").id,
   );
-  const goalMatchScore = Math.max(0, 100 - Math.round((averageGoalDeviationMinutes / 60) * 30));
+  let input: { startTime: string; endTime: string } | undefined;
+  let validation: string | undefined =
+    sessionId && !existing
+      ? "This sleep log no longer exists. Cancel and return to your logs."
+      : undefined;
+  try {
+    input = {
+      startTime: resolveWallTime(
+        start,
+        startZone,
+        existing?.startTime,
+        startOccurrence === "Ask" ? undefined : startOccurrence,
+      ),
+      endTime: resolveWallTime(
+        end,
+        endZone,
+        existing?.endTime ?? undefined,
+        endOccurrence === "Ask" ? undefined : endOccurrence,
+      ),
+    };
+    if (Date.parse(input.endTime) <= Date.parse(input.startTime))
+      validation =
+        "Wake time must be after bedtime. Check both dates and time zones.";
+    else if (
+      !isValidSession({ ...existing, ...input } as Parameters<
+        typeof isValidSession
+      >[0])
+    )
+      validation = "A sleep log must last at least 5 minutes.";
+  } catch (failure) {
+    validation =
+      failure instanceof Error ? failure.message : "Check the date and time.";
+  }
 
   async function save() {
-    await upsertSleepLog({
-      id: existing?.id,
-      tag,
-      startTime: sleepDate.toISOString(),
-      endTime: wakeDate.toISOString(),
-      startTimeZoneIdentifier: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      endTimeZoneIdentifier: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      needsHealthKitSync: true,
-    });
-    router.back();
+    if (submitting.current || validation || !input) return;
+    submitting.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      await upsert({
+        id: savedId,
+        tag,
+        ...input,
+        startTimeZoneIdentifier: existing
+          ? existing.startTimeZoneIdentifier
+          : startZone,
+        endTimeZoneIdentifier: existing
+          ? existing.endTimeZoneIdentifier
+          : endZone,
+      });
+      router.back();
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Could not save. Your draft is still here. Try again.",
+      );
+    } finally {
+      submitting.current = false;
+      setSaving(false);
+    }
   }
-
-  function onDateChange(date: Date) {
-    setShowDatePicker(false);
-    setSessionDay(startOfDay(date));
-  }
-
   return (
     <NativeScreen>
       <SectionHeader
         title={existing ? "Edit Log" : "Log Sleep"}
-        subtitle="Wake day drives the calendar day, matching Twilight’s sleep semantics."
+        subtitle="Times stay in their original zones, including when you travel."
       />
-
-      <GlassPanel style={{ gap: 14 }}>
-        <SectionHeader title="Wake Day" subtitle="The night is attributed to the day you woke up." compact />
-        <TwilightButton
-          title={formatDay(sessionDay)}
-          subtle
-          onPress={() => setShowDatePicker(true)}
-        />
-        {showDatePicker ? <DateTimePicker value={sessionDay} mode="date" onValueChange={onDateChange} onDismiss={() => setShowDatePicker(false)} /> : null}
-        <MetricGrid>
-          <MetricCard title="Goal Match" value={`${goalMatchScore}%`} subtitle={`${averageGoalDeviationMinutes}m avg drift`} icon="◎" tint={goalMatchScore >= 80 ? palette.green : palette.orange} />
-          <MetricCard title="Duration" value={formatDurationLong(durationSeconds)} subtitle="sleep window" icon="◒" tint={palette.cyan} />
-        </MetricGrid>
-      </GlassPanel>
-
-      <SleepWindowDialChart
-        sleepMinutes={sleepMinutes}
-        wakeMinutes={wakeMinutes}
-        onSleepChange={setSleepMinutes}
-        onWakeChange={setWakeMinutes}
+      <Endpoint
+        title="Bedtime"
+        value={start}
+        zone={startZone}
+        onChange={setStart}
+        occurrence={startOccurrence}
+        onOccurrenceChange={setStartOccurrence}
       />
-
-      <GlassPanel style={{ gap: 14 }}>
-        <SectionHeader title="Timing" subtitle="Circular picker values translated into exact session timestamps." compact />
-        <MetricGrid>
-          <MetricCard title="Bedtime" value={formatClock(sleepMinutes)} subtitle={formatDay(sleepDate)} icon="☾" tint={palette.indigo} />
-          <MetricCard title="Wake" value={formatClock(wakeMinutes)} subtitle={formatDay(wakeDate)} icon="☀" tint={palette.orange} />
-        </MetricGrid>
+      <Endpoint
+        title="Wake time"
+        value={end}
+        zone={endZone}
+        onChange={setEnd}
+        occurrence={endOccurrence}
+        onOccurrenceChange={setEndOccurrence}
+      />
+      <GlassPanel style={{ gap: 12 }}>
         <TextInput
+          accessibilityLabel="Log label"
           value={tag}
-          placeholder="Manual Log"
-          placeholderTextColor={theme.textSecondary}
           onChangeText={setTag}
           style={{
-            minHeight: 50,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: theme.outline,
-            backgroundColor: theme.cardMuted,
+            minHeight: 48,
             color: theme.textPrimary,
-            paddingHorizontal: 14,
-            fontSize: 15,
+            borderColor: theme.outline,
+            borderWidth: 1,
+            borderRadius: 12,
+            padding: 12,
           }}
         />
-      </GlassPanel>
-
-      <GlassPanel style={{ gap: 10 }}>
-        <TwilightButton title="Save Log" onPress={() => void save()} />
-        <TwilightButton title="Cancel" subtle onPress={() => router.back()} />
-        <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 17, textAlign: "center" }}>
-          Goal match is derived from your configured bedtime and wake-time targets.
+        <Text
+          selectable
+          style={{
+            color: validation || error ? theme.danger : theme.textSecondary,
+          }}
+        >
+          {validation ??
+            error ??
+            (input
+              ? formatDurationLong(
+                  (Date.parse(input.endTime) - Date.parse(input.startTime)) /
+                    1000,
+                )
+              : "")}
         </Text>
+        <TwilightButton
+          title={saving ? "Saving..." : error ? "Retry Save" : "Save Log"}
+          disabled={saving || !!validation}
+          onPress={() => void save()}
+        />
+        <TwilightButton
+          title="Cancel"
+          subtle
+          disabled={saving}
+          onPress={() => router.back()}
+        />
       </GlassPanel>
     </NativeScreen>
   );

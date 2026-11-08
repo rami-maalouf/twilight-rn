@@ -60,8 +60,14 @@ const sunset: AppTheme = {
   glass: "rgba(255,255,255,0.24)",
 };
 
-export function getTheme(appearance: AppearanceSettings): AppTheme {
-  if (appearance.themeMode === "Sunset") {
+export function getTheme(
+  appearance: AppearanceSettings,
+  deviceScheme?: "light" | "dark" | "unspecified" | null,
+): AppTheme {
+  if (
+    appearance.themeMode === "Sunset" ||
+    (appearance.themeMode === "System" && deviceScheme === "light")
+  ) {
     return sunset;
   }
 

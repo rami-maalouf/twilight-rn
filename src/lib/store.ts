@@ -120,8 +120,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   async updateSleepSettings(partial) {
     const sleepSettings = await setSleepSettings(partial);
-    await scheduleWindDownReminder(sleepSettings);
     set({ sleepSettings });
+    await scheduleWindDownReminder(sleepSettings);
   },
 
   async startSleepSession() {
@@ -167,13 +167,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       startTime: input.startTime ?? existing?.startTime ?? new Date().toISOString(),
       endTime: input.endTime ?? existing?.endTime ?? null,
       startTimeZoneIdentifier:
-        input.startTimeZoneIdentifier ??
-        existing?.startTimeZoneIdentifier ??
-        Intl.DateTimeFormat().resolvedOptions().timeZone,
+        input.startTimeZoneIdentifier !== undefined
+          ? input.startTimeZoneIdentifier
+          : existing ? existing.startTimeZoneIdentifier : Intl.DateTimeFormat().resolvedOptions().timeZone,
       endTimeZoneIdentifier:
-        input.endTimeZoneIdentifier ??
-        existing?.endTimeZoneIdentifier ??
-        Intl.DateTimeFormat().resolvedOptions().timeZone,
+        input.endTimeZoneIdentifier !== undefined
+          ? input.endTimeZoneIdentifier
+          : existing ? existing.endTimeZoneIdentifier : Intl.DateTimeFormat().resolvedOptions().timeZone,
       needsHealthKitSync: true,
       healthKitSyncVersion: existing?.healthKitSyncVersion ?? 2,
     };

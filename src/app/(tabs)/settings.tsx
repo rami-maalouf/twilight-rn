@@ -1,16 +1,28 @@
-import DateTimePicker from "@react-native-community/datetimepicker";
+import { DateTimePicker } from "@expo/ui/community/datetime-picker";
+import { Host, Switch } from "@expo/ui";
 import { Ionicons } from "@expo/vector-icons";
+import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Platform, Pressable, StyleSheet, Switch, Text, View } from "react-native";
+import {
+  AppState,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
 import { dateFromMinutes, formatClock, minutesFromDate } from "@/lib/format";
-import { ensureNotificationPermission } from "@/lib/notifications";
+import {
+  ensureNotificationPermission,
+  openNotificationSettings,
+  scheduleWindDownReminder,
+} from "@/lib/notifications";
 import { selectDemoMode, useAppStore } from "@/lib/store";
 import type { ColorPalette, ThemeMode } from "@/lib/types";
-import {
-  NativeSegmentedControl,
-} from "@/ui/native";
+import { NativeSegmentedControl } from "@/ui/native";
 import {
   GlassPanel,
   NativeScreen,
@@ -23,34 +35,37 @@ import {
 const themeModes: ThemeMode[] = ["System", "Sunset", "Night Sky"];
 const palettes: ColorPalette[] = ["Twilight", "Amethyst"];
 
-/* ── Inline row components for settings ─────────────────────────── */
+// settings rows
 
 function SettingsSwitchRow({
   title,
   subtitle,
   value,
   onValueChange,
+  disabled,
 }: {
   title: string;
   subtitle?: string;
+  disabled?: boolean;
   value: boolean;
   onValueChange: (v: boolean) => void;
 }) {
   const { theme } = useTwilightTheme();
   return (
-    <View style={rowStyles.row}>
-      <View style={rowStyles.label}>
-        <Text style={[rowStyles.title, { color: theme.textPrimary }]}>{title}</Text>
-        {subtitle ? (
-          <Text style={[rowStyles.subtitle, { color: theme.textSecondary }]}>{subtitle}</Text>
-        ) : null}
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: theme.outline, true: theme.accent }}
-        thumbColor={Platform.OS === "ios" ? undefined : value ? theme.accent : "#f4f3f4"}
-      />
+    <View style={{ padding: 16, gap: 8 }}>
+      <Host matchContents={{ vertical: true }}>
+        <Switch
+          disabled={disabled}
+          value={value}
+          onValueChange={onValueChange}
+          label={title}
+        />
+      </Host>
+      {subtitle ? (
+        <Text style={[rowStyles.subtitle, { color: theme.textSecondary }]}>
+          {subtitle}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -88,9 +103,13 @@ function SettingsNavRow({
         </View>
       ) : null}
       <View style={rowStyles.label}>
-        <Text style={[rowStyles.title, { color: theme.textPrimary }]}>{title}</Text>
+        <Text style={[rowStyles.title, { color: theme.textPrimary }]}>
+          {title}
+        </Text>
         {subtitle ? (
-          <Text style={[rowStyles.subtitle, { color: theme.textSecondary }]}>{subtitle}</Text>
+          <Text style={[rowStyles.subtitle, { color: theme.textSecondary }]}>
+            {subtitle}
+          </Text>
         ) : null}
       </View>
       <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
@@ -100,12 +119,22 @@ function SettingsNavRow({
 
 function SettingsDivider() {
   const { theme } = useTwilightTheme();
-  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: theme.outline, marginLeft: 16 }} />;
+  return (
+    <View
+      style={{
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: theme.outline,
+        marginLeft: 16,
+      }}
+    />
+  );
 }
 
 function SettingsRowGroup({ children }: { children: React.ReactNode }) {
   const { theme } = useTwilightTheme();
-  const items = (Array.isArray(children) ? children : [children]).filter(Boolean);
+  const items = (Array.isArray(children) ? children : [children]).filter(
+    Boolean,
+  );
   return (
     <View
       style={{
@@ -149,7 +178,7 @@ const rowStyles = StyleSheet.create({
   },
 });
 
-/* ── Sleep time picker field ─────────────────────────────────────── */
+// sleep time picker
 
 function SleepTimePickerField({
   label,
@@ -182,16 +211,24 @@ function SleepTimePickerField({
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Text style={{ color, fontSize: 14 }}>{icon}</Text>
-        <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "600" }}>{label}</Text>
+        <Text
+          style={{
+            color: theme.textSecondary,
+            fontSize: 12,
+            fontWeight: "600",
+          }}
+        >
+          {label}
+        </Text>
       </View>
       {Platform.OS === "ios" ? (
         <DateTimePicker
           value={dateValue}
           mode="time"
           display="compact"
-          minuteInterval={5}
           accentColor={color}
-          onValueChange={(date) => {
+          onValueChange={(_, date) => {
+            setShowAndroidPicker(false);
             if (date) onChange(minutesFromDate(date));
           }}
         />
@@ -207,7 +244,13 @@ function SleepTimePickerField({
               alignSelf: "flex-start",
             }}
           >
-            <Text style={{ color: theme.textPrimary, fontSize: 20, fontWeight: "800" }}>
+            <Text
+              style={{
+                color: theme.textPrimary,
+                fontSize: 20,
+                fontWeight: "800",
+              }}
+            >
               {formatClock(value)}
             </Text>
           </Pressable>
@@ -216,8 +259,8 @@ function SleepTimePickerField({
               value={dateValue}
               mode="time"
               display="spinner"
-              minuteInterval={5}
-              onValueChange={(date) => {
+              onValueChange={(_, date) => {
+                setShowAndroidPicker(false);
                 if (date) onChange(minutesFromDate(date));
               }}
               onDismiss={() => setShowAndroidPicker(false)}
@@ -229,7 +272,7 @@ function SleepTimePickerField({
   );
 }
 
-/* ── Settings screen ────────────────────────────────────────────── */
+// settings screen
 
 export default function SettingsRoute() {
   const setLastViewedTab = useAppStore((state) => state.setLastViewedTab);
@@ -242,10 +285,47 @@ export default function SettingsRoute() {
   const { theme } = useTwilightTheme();
   const palette = chartPalette(theme);
 
-  const [windDownReminderEnabled, setWindDownReminderEnabled] = useState(sleepSettings.windDownReminderEnabled);
-  const [healthSyncEnabled, setHealthSyncEnabled] = useState(sleepSettings.healthSyncEnabled);
+  const [error, setError] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const durationMinutes = (sleepSettings.optimalWakeMinutes - sleepSettings.optimalSleepMinutes + 24 * 60) % (24 * 60);
+  async function perform(action: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await action();
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Could not save. Try again.",
+      );
+    }
+  }
+
+  useEffect(() => {
+    const check = async () => {
+      const permission = await Notifications.getPermissionsAsync();
+      setDenied(!permission.granted);
+      await scheduleWindDownReminder(useAppStore.getState().sleepSettings);
+    };
+    void check().catch((failure) =>
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "Could not check notifications.",
+      ),
+    );
+    const listener = AppState.addEventListener("change", (state) => {
+      if (state === "active") void perform(check);
+    });
+    return () => listener.remove();
+  }, []);
+
+  const durationMinutes =
+    (sleepSettings.optimalWakeMinutes -
+      sleepSettings.optimalSleepMinutes +
+      24 * 60) %
+    (24 * 60);
   const durationH = Math.floor(durationMinutes / 60);
   const durationM = durationMinutes % 60;
   const healthy = durationH >= 7 && durationH <= 9;
@@ -254,15 +334,18 @@ export default function SettingsRoute() {
     setLastViewedTab("settings").catch(() => undefined);
   }, [setLastViewedTab]);
 
-  async function saveSettings() {
-    if (windDownReminderEnabled) {
-      await ensureNotificationPermission();
-    }
-
-    await updateSleepSettings({
-      windDownReminderEnabled,
-      healthSyncEnabled,
+  async function changeReminder(enabled: boolean) {
+    if (busy) return;
+    setBusy(true);
+    await perform(async () => {
+      if (enabled) {
+        const permission = await ensureNotificationPermission();
+        setDenied(!permission.granted);
+        if (!permission.granted) return;
+      }
+      await updateSleepSettings({ windDownReminderEnabled: enabled });
     });
+    setBusy(false);
   }
 
   return (
@@ -273,7 +356,11 @@ export default function SettingsRoute() {
       />
 
       <GlassPanel style={{ gap: 16 }}>
-        <SectionHeader title="Sleep Goal" subtitle="These targets power scoring, reminders, and charts." compact />
+        <SectionHeader
+          title="Sleep Goal"
+          subtitle="These targets power scoring, reminders, and charts."
+          compact
+        />
 
         <View style={{ alignItems: "center", gap: 4, paddingVertical: 4 }}>
           <Text
@@ -286,7 +373,9 @@ export default function SettingsRoute() {
           >
             {durationH}h {durationM > 0 ? `${durationM}m` : ""}
           </Text>
-          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>sleep duration</Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+            sleep duration
+          </Text>
         </View>
 
         <View style={{ flexDirection: "row", gap: 10 }}>
@@ -295,58 +384,95 @@ export default function SettingsRoute() {
             icon="☾"
             value={sleepSettings.optimalSleepMinutes}
             color={palette.indigo}
-            onChange={(minutes) => void updateSleepSettings({ optimalSleepMinutes: minutes })}
+            onChange={(minutes) =>
+              void perform(() =>
+                updateSleepSettings({ optimalSleepMinutes: minutes }),
+              )
+            }
           />
           <SleepTimePickerField
             label="Wake up"
             icon="☀"
             value={sleepSettings.optimalWakeMinutes}
             color={palette.orange}
-            onChange={(minutes) => void updateSleepSettings({ optimalWakeMinutes: minutes })}
+            onChange={(minutes) =>
+              void perform(() =>
+                updateSleepSettings({ optimalWakeMinutes: minutes }),
+              )
+            }
           />
         </View>
       </GlassPanel>
 
       <GlassPanel style={{ gap: 12 }}>
-        <SectionHeader title="Appearance" subtitle="Customize the look and feel of Twilight." compact />
+        <SectionHeader
+          title="Appearance"
+          subtitle="Customize the look and feel of Twilight."
+          compact
+        />
         <View style={{ gap: 10 }}>
-          <NativeSegmentedControl options={themeModes} value={appearance.themeMode} onChange={(value) => void updateAppearance({ themeMode: value })} />
-          <NativeSegmentedControl options={palettes} value={appearance.colorPalette} onChange={(value) => void updateAppearance({ colorPalette: value })} />
+          <NativeSegmentedControl
+            options={themeModes}
+            value={appearance.themeMode}
+            onChange={(value) =>
+              void perform(() => updateAppearance({ themeMode: value }))
+            }
+          />
+          <NativeSegmentedControl
+            options={palettes}
+            value={appearance.colorPalette}
+            onChange={(value) =>
+              void perform(() => updateAppearance({ colorPalette: value }))
+            }
+          />
         </View>
       </GlassPanel>
 
       <GlassPanel style={{ gap: 12 }}>
-        <SectionHeader title="Notifications" subtitle="Stay on track with timely reminders." compact />
+        <SectionHeader
+          title="Notifications"
+          subtitle="Stay on track with timely reminders."
+          compact
+        />
         <SettingsRowGroup>
           <SettingsSwitchRow
+            disabled={busy}
             title="Wind-down reminder"
-            subtitle="Schedules a daily reminder before bedtime."
-            value={windDownReminderEnabled}
-            onValueChange={setWindDownReminderEnabled}
+            subtitle="Daily, 3 hours before bedtime."
+            value={sleepSettings.windDownReminderEnabled}
+            onValueChange={(value) => void changeReminder(value)}
           />
         </SettingsRowGroup>
       </GlassPanel>
 
       <GlassPanel style={{ gap: 12 }}>
-        <SectionHeader title="Health Sync" subtitle="Keep your sleep data in sync with Apple Health." compact />
-        <SettingsRowGroup>
-          <SettingsSwitchRow
-            title="Sync with Apple Health"
-            subtitle="Automatically export sessions to the Health app."
-            value={healthSyncEnabled}
-            onValueChange={setHealthSyncEnabled}
-          />
-        </SettingsRowGroup>
-      </GlassPanel>
-
-      <GlassPanel style={{ gap: 12 }}>
-        <SectionHeader title="Community & Data" subtitle="Support the project and manage your data." compact />
+        <SectionHeader
+          title="Community & Data"
+          subtitle="Support the project and manage your data."
+          compact
+        />
         <SettingsRowGroup>
           <SettingsNavRow
-            title="Support Twilight"
-            subtitle="Indie-built, community-supported."
-            icon="heart"
-            onPress={() => router.push("/modals/support")}
+            title="Join the community"
+            subtitle="Twilight on Discord"
+            icon="chatbubbles-outline"
+            onPress={() =>
+              void perform(() =>
+                Linking.openURL("https://discord.gg/9tj7J5MESv"),
+              )
+            }
+          />
+          <SettingsNavRow
+            title="Orbit Labs"
+            subtitle="Follow the project on LinkedIn"
+            icon="people-outline"
+            onPress={() =>
+              void perform(() =>
+                Linking.openURL(
+                  "https://www.linkedin.com/company/orbitlabsdotstudio",
+                ),
+              )
+            }
           />
           <SettingsNavRow
             title="Import & Export Data"
@@ -358,7 +484,11 @@ export default function SettingsRoute() {
       </GlassPanel>
 
       <GlassPanel style={{ gap: 12 }}>
-        <SectionHeader title="Development" subtitle="Debug and exploration tools." compact />
+        <SectionHeader
+          title="Development"
+          subtitle="Debug and exploration tools."
+          compact
+        />
         <TwilightButton
           title="Open Onboarding"
           onPress={() => router.push("/onboarding")}
@@ -367,15 +497,80 @@ export default function SettingsRoute() {
 
       {isDemoMode ? (
         <GlassPanel style={{ gap: 12 }}>
-          <SectionHeader title="Demo Data" subtitle="Exit demo mode and restore your data." compact />
-          <TwilightButton title="Exit Demo and Restore Previous Data" onPress={() => void exitDemoMode()} />
+          <SectionHeader
+            title="Demo Data"
+            subtitle="Exit demo mode and restore your data."
+            compact
+          />
+          <TwilightButton
+            title="Exit Demo and Restore Previous Data"
+            onPress={() => void exitDemoMode()}
+          />
         </GlassPanel>
       ) : null}
 
-      <TwilightButton
-        title="Save Changes"
-        onPress={() => void saveSettings()}
-      />
+      {denied ? (
+        <GlassPanel style={{ gap: 12 }}>
+          <Text selectable style={{ color: theme.textSecondary }}>
+            Notifications are disabled. Enable them in app settings, then return
+            here.
+          </Text>
+          <TwilightButton
+            title="Open notification settings"
+            onPress={() => void perform(openNotificationSettings)}
+          />
+        </GlassPanel>
+      ) : null}
+      {error ? (
+        <Text
+          selectable
+          accessibilityRole="alert"
+          style={{ color: theme.danger }}
+        >
+          {error}
+        </Text>
+      ) : null}
+      <GlassPanel style={{ gap: 12 }}>
+        <SectionHeader
+          title="Your Wind-Down Routine"
+          subtitle="Follow this timeline for better sleep."
+          compact
+        />
+        {[
+          [
+            180,
+            "Finish your last meal. Switch to water only. No more caffeine or alcohol.",
+          ],
+          [
+            120,
+            "Dim overhead lights and switch to lamps or candles. Stop water intake. Enable night mode and blue light filters.",
+          ],
+          [
+            60,
+            "Stop stimulating activities. Read or stretch. Keep your room between 17-20°C (63-68°F).",
+          ],
+          [0, "Complete darkness. Quiet environment. Start your sleep timer."],
+        ].map(([offset, text]) => (
+          <View key={offset} style={{ gap: 4 }}>
+            <Text style={{ color: theme.textPrimary, fontWeight: "700" }}>
+              {formatClock(
+                (sleepSettings.optimalSleepMinutes - Number(offset) + 1440) %
+                  1440,
+              )}{" "}
+              - {offset ? `${Number(offset) / 60} hours before` : "Bedtime"}
+            </Text>
+            <Text style={{ color: theme.textSecondary, lineHeight: 22 }}>
+              {text}
+            </Text>
+          </View>
+        ))}
+        <Text style={{ color: theme.textSecondary, lineHeight: 22 }}>
+          Your body needs time to transition to sleep mode. Bright lights
+          suppress melatonin, late meals keep your digestive system active, and
+          screens stimulate your brain. Following this routine signals to your
+          body that it is time to rest.
+        </Text>
+      </GlassPanel>
     </NativeScreen>
   );
 }

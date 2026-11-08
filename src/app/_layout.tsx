@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as SystemUI from "expo-system-ui";
 import { Stack } from "expo-router";
 import { useEffect } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { Appearance, useColorScheme, ActivityIndicator, Pressable, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableScreens } from "react-native-screens";
 
@@ -19,7 +19,11 @@ function RootContent() {
   const appearance = useAppStore((state) => state.appearance);
   const currentErrorMessage = useAppStore((state) => state.currentErrorMessage);
   const clearError = useAppStore((state) => state.clearError);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
+
+  useEffect(() => {
+    Appearance.setColorScheme(appearance.themeMode === "System" ? null : appearance.themeMode === "Sunset" ? "light" : "dark");
+  }, [appearance.themeMode]);
 
   useEffect(() => {
     void hydrate();

@@ -2,6 +2,7 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { useMemo } from "react";
 import {
+  useColorScheme,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,9 +19,10 @@ import { useAppStore } from "@/lib/store";
 
 export function useTwilightTheme() {
   const appearance = useAppStore((state) => state.appearance);
+  const deviceScheme = useColorScheme();
   return {
     appearance,
-    theme: getTheme(appearance),
+    theme: getTheme(appearance, deviceScheme),
   };
 }
 

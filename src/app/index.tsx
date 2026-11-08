@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { useEffect } from "react";
-import { ActivityIndicator, Text } from "react-native";
+import { useColorScheme, ActivityIndicator, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { getTheme } from "@/lib/theme";
@@ -9,7 +9,7 @@ import { useAppStore } from "@/lib/store";
 export default function IndexRoute() {
   const appearance = useAppStore((state) => state.appearance);
   const isOnboarded = useAppStore((state) => state.sleepSettings.isOnboarded);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
 
   useEffect(() => {
     const href = isOnboarded ? "/(tabs)/home" : "/onboarding";
