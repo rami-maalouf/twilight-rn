@@ -10,6 +10,14 @@
       "output": "static"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ],
       "expo-router",
       [
         "expo-notifications",
@@ -31,7 +39,45 @@
           "resizeMode": "contain",
           "backgroundColor": "#0A1520"
         }
-      ]
+      ],
+      "expo-status-bar",
+      [
+        "./src/widgets/android-plugin.cjs",
+        {
+          "enableAndroid": true,
+          "widgets": [
+            {
+              "name": "TwilightSleepStatus",
+              "displayName": "Sleep status",
+              "description": "Your saved sleep status and nightly target. Open Twilight to start or finish sleep.",
+              "ios": null,
+              "android": {
+                "minWidth": 180,
+                "minHeight": 210,
+                "targetCellWidth": 2,
+                "targetCellHeight": 3,
+                "resizeMode": "horizontal",
+                "initialLayout": "src/widgets/sleep-status.android.tsx"
+              }
+            },
+            {
+              "name": "TwilightSleepOverview",
+              "displayName": "Sleep overview",
+              "description": "Latest recorded sleep and the last seven calendar days, using your Twilight sleep logs.",
+              "ios": null,
+              "android": {
+                "minWidth": 300,
+                "minHeight": 210,
+                "targetCellWidth": 4,
+                "targetCellHeight": 3,
+                "resizeMode": "horizontal",
+                "initialLayout": "src/widgets/sleep-overview.android.tsx"
+              }
+            }
+          ]
+        }
+      ],
+      "./plugins/with-health-connect"
     ],
     "experiments": {
       "typedRoutes": true

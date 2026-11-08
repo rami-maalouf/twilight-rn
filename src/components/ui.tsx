@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Link } from "expo-router";
 import { Fragment, useMemo } from "react";
 import {
+  useColorScheme,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,7 +35,7 @@ export function AppScreen({
   scroll?: boolean;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const insets = useSafeAreaInsets();
   const topPadding = 8;
   const bottomPadding = 96;
@@ -84,7 +85,7 @@ export function GlassCard({
   className?: string;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <BlurView
       intensity={24}
@@ -108,7 +109,7 @@ export function PrimaryButton({
   icon,
 }: ButtonProps) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const background = subtle ? theme.glass : theme.accent;
   const color = subtle ? theme.textPrimary : appearance.themeMode === "Sunset" ? "#FFFFFF" : "#06131B";
 
@@ -143,7 +144,7 @@ export function SectionTitle({
   trailing?: React.ReactNode;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View className="flex-row items-end justify-between gap-4">
       <View className="flex-1">
@@ -171,7 +172,7 @@ export function SegmentedControl<T extends string>({
   onChange: (value: T) => void;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View
       className="flex-row rounded-full p-1"
@@ -207,7 +208,7 @@ export function StatGrid({
   items: { label: string; value: string; tone?: string; helper?: string }[];
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View className="flex-row flex-wrap gap-3">
       {items.map((item) => (
@@ -247,7 +248,7 @@ export function EmptyState({
   subtitle: string;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <GlassCard className="items-center py-10">
       <Text style={{ color: theme.textPrimary }} className="text-xl font-semibold">
@@ -272,7 +273,7 @@ export function ToggleRow({
   onValueChange: (value: boolean) => void;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View className="flex-row items-center gap-4 py-3">
       <View className="flex-1">
@@ -308,7 +309,7 @@ export function InputRow({
   multiline?: boolean;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View className="gap-2">
       <Text style={{ color: theme.textSecondary }} className="text-xs uppercase tracking-[1.4px]">
@@ -341,7 +342,7 @@ export function MiniTrendChart({
   height?: number;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const width = 320;
   const safeValues = values.length > 0 ? values : [0];
   const min = Math.min(...safeValues);
@@ -383,7 +384,7 @@ export function BarChart({
   formatLabel?: (value: number) => string;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const max = Math.max(1, ...values);
   const width = Math.max(320, labels.length * 44);
   const barWidth = 24;
@@ -438,7 +439,7 @@ export function SleepWindowDial({
   onWakeChange: (minutes: number) => void;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const size = 240;
   const center = size / 2;
   const radius = 78;
@@ -505,7 +506,7 @@ export function MetricRow({
   helper?: string;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View className="flex-row items-center justify-between gap-3 py-2">
       <View className="flex-1">
@@ -537,7 +538,7 @@ export function SessionRow({
   onPress?: () => void;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <Pressable
       onPress={onPress}
@@ -575,7 +576,7 @@ export function LinkButton({ href, title }: { href: string; title: string }) {
 
 function Starfield() {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const stars = useMemo(
     () =>
       Array.from({ length: 40 }, (_, index) => ({
@@ -610,7 +611,7 @@ function Starfield() {
 
 export function DurationBadge({ seconds }: { seconds: number }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View
       className="rounded-full px-3 py-2"
@@ -625,7 +626,7 @@ export function DurationBadge({ seconds }: { seconds: number }) {
 
 export function TrendPill({ label, value }: { label: string; value: number | null }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   return (
     <View
       className="rounded-full px-3 py-2"
@@ -651,7 +652,7 @@ export function SessionTimelineCard({
   goal: number;
 }) {
   const appearance = useAppStore((state) => state.appearance);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
   const duration = (wake.getTime() - bedtime.getTime()) / 1000;
   return (
     <GlassCard>

@@ -13,10 +13,11 @@ import {
   TrendsAnalysisCard,
   WeekdayAverageChart,
 } from "@/charts";
+import { AnalyticsSelector, SleepRegularityCard, SleepTimeCard } from "@/charts/analytics";
 import { formatSignedHours } from "@/lib/format";
-import { buildSleepMetrics } from "@/lib/sleep";
+import { buildSleepMetrics, clipSleepSeries, sleepStreaks, validCompletedSessions } from "@/lib/sleep";
 import { useAppStore } from "@/lib/store";
-import type { SleepMetricsRange, SleepNightRecord } from "@/lib/types";
+import type { SleepMetricsRange } from "@/lib/types";
 import {
   EmptyPanel,
   GlassPanel,
@@ -24,7 +25,6 @@ import {
   MetricGrid,
   NativeScreen,
   SectionHeader,
-  SegmentedPills,
   TwilightButton,
   chartPalette,
   formatHoursCompact,
@@ -34,40 +34,6 @@ import {
 const rangeOptions: SleepMetricsRange[] = ["30D", "90D", "1Y", "All"];
 const regularityOptions = ["All", "Bedtime", "Wake", "Accuracy"] as const;
 type RegularityComponent = (typeof regularityOptions)[number];
-
-function dayStamp(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-}
-
-function currentStreak(records: SleepNightRecord[]) {
-  if (records.length === 0) return 0;
-  const sorted = [...new Set(records.map((record) => dayStamp(record.date)))].sort((left, right) => right - left);
-  let streak = 1;
-  for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index - 1] - sorted[index] === 24 * 60 * 60 * 1000) {
-      streak += 1;
-    } else {
-      break;
-    }
-  }
-  return streak;
-}
-
-function bestStreak(records: SleepNightRecord[]) {
-  if (records.length === 0) return 0;
-  const sorted = [...new Set(records.map((record) => dayStamp(record.date)))].sort((left, right) => right - left);
-  let best = 1;
-  let run = 1;
-  for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index] - sorted[index - 1] === 24 * 60 * 60 * 1000) {
-      run += 1;
-    } else {
-      run = 1;
-    }
-    best = Math.max(best, run);
-  }
-  return best;
-}
 
 function formatPercent(value: number | null) {
   return value == null ? "-" : `${Math.round(value)}%`;
@@ -97,7 +63,7 @@ export default function MetricsRoute() {
   }, [setLastViewedTab]);
 
   const completedSessions = useMemo(
-    () => sessions.filter((session) => session.endTime),
+    () => validCompletedSessions(sessions),
     [sessions],
   );
 
@@ -106,13 +72,13 @@ export default function MetricsRoute() {
     [completedSessions, sleepSettings.optimalSleepMinutes, sleepSettings.optimalWakeMinutes],
   );
   const records = metrics.recordsInRange(range);
-  const movingAverageSeries = metrics.movingAverageSeries(records, 7);
-  const consistencySeries = metrics.rollingConsistencySeries(records, records.length < 14 ? 7 : 14);
-  const debtSeries = metrics.cumulativeDebtSeries(records);
+  const movingAverageSeries = clipSleepSeries(metrics.movingAverageSeries(metrics.records, 7), records);
+  const consistencySeries = clipSleepSeries(metrics.rollingConsistencySeries(metrics.records, metrics.records.length < 14 ? 7 : 14), records);
+  const debtSeries = clipSleepSeries(metrics.cumulativeDebtSeries(metrics.records), records);
   const weekdayAverages = metrics.weekdayAverages(records);
   const durationBuckets = metrics.durationBuckets(records);
   const trendPeriods = metrics.durationTrendsAnalysis();
-  const alignmentSeries = metrics.sleepAlignmentSeries(records);
+  const alignmentSeries = clipSleepSeries(metrics.sleepAlignmentSeries(metrics.records), records);
   const socialJetlag = metrics.socialJetlag(records);
   const durationTrend = metrics.durationTrendPercent(records);
   const latestScore = alignmentSeries.at(-1);
@@ -138,7 +104,7 @@ export default function MetricsRoute() {
         }
       />
 
-      <SegmentedPills options={rangeOptions} value={range} onChange={setRange} />
+      <AnalyticsSelector options={rangeOptions} value={range} onChange={setRange} />
 
       {records.length === 0 ? (
         <EmptyPanel
@@ -154,8 +120,8 @@ export default function MetricsRoute() {
               <MetricCard title="Coverage" value={`${metrics.trackingCoverage(records, range)}%`} subtitle="range filled" icon="◌" tint={palette.indigo} />
               <MetricCard title="Average" value={averageDuration == null ? "-" : formatHoursCompact(averageDuration)} subtitle="per night" icon="◒" tint={palette.green} />
               <MetricCard title="Goal Hit" value={`${metrics.goalHitRate(records)}%`} subtitle="within 45 minutes" icon="◎" tint={palette.orange} />
-              <MetricCard title="Current Streak" value={`${currentStreak(records)}`} subtitle="wake-days" icon="🔥" tint={palette.pink} />
-              <MetricCard title="Best Streak" value={`${bestStreak(records)}`} subtitle="longest run" icon="↟" tint={palette.cyan} />
+              <MetricCard title="Current Streak" value={`${sleepStreaks(metrics.records.map(record => record.date)).current}`} subtitle="wake-days" icon="🔥" tint={palette.pink} />
+              <MetricCard title="Best Streak" value={`${sleepStreaks(metrics.records.map(record => record.date)).longest}`} subtitle="longest run" icon="↟" tint={palette.cyan} />
             </MetricGrid>
           </GlassPanel>
 
@@ -172,13 +138,15 @@ export default function MetricsRoute() {
           <GlassPanel style={{ gap: 12 }}>
             <SectionHeader title="Duration Momentum" subtitle="Nightly duration smoothed into a 7-night moving average." compact />
             {movingAverageSeries.some((point) => point.movingAverageHours != null) ? (
-              <DurationMomentumChart series={movingAverageSeries} targetHours={metrics.targetDurationHours} />
+              <DurationMomentumChart key={range} series={movingAverageSeries} targetHours={metrics.targetDurationHours} />
             ) : (
               <InlineEmpty title="Track 7 nights" subtitle="The duration trend appears once there are enough completed nights in this range." />
             )}
           </GlassPanel>
 
           <TrendsAnalysisCard periods={trendPeriods} />
+          <GlassPanel><SleepTimeCard metrics={metrics} records={records} /></GlassPanel>
+          <GlassPanel><SleepRegularityCard metrics={metrics} range={range} /></GlassPanel>
 
           <GlassPanel style={{ gap: 12 }}>
             <SectionHeader title="Regularity" subtitle="Bedtime, wake-time, and schedule accuracy blended into a stability score." compact />
@@ -197,7 +165,7 @@ export default function MetricsRoute() {
 
           <GlassPanel style={{ gap: 12 }}>
             <SectionHeader title="Regularity Components" subtitle="Switch between the timing filters to inspect the source of your score." compact />
-            <SegmentedPills options={regularityOptions} value={regComp} onChange={setRegComp} />
+            <AnalyticsSelector options={regularityOptions} value={regComp} onChange={setRegComp} />
             <RegularityComponentsChart series={consistencySeries} component={regComp} />
           </GlassPanel>
 
@@ -220,12 +188,12 @@ export default function MetricsRoute() {
 
           <GlassPanel style={{ gap: 12 }}>
             <SectionHeader title="Nerd Stats" subtitle="Deeper scoring outputs from the sleep analyzer." compact />
-            <SleepAlignmentChart series={alignmentSeries} />
+            <SleepAlignmentChart key={range} series={alignmentSeries} />
             <MetricGrid>
-              <MetricCard title="Latest Score" value={latestScore ? `${latestScore.dailyScore}%` : "-"} subtitle="alignment" icon="◎" tint={palette.green} />
-              <MetricCard title="Core Score" value={latestScore ? `${latestScore.coreScore}%` : "-"} subtitle="duration + consistency" icon="◒" tint={palette.cyan} />
-              <MetricCard title="Phase" value={latestScore ? `${latestScore.phaseScore}%` : "-"} subtitle="midpoint match" icon="◌" tint={palette.indigo} />
-              <MetricCard title="Timing" value={latestScore ? `${latestScore.timingScore}%` : "-"} subtitle="bed/wake targets" icon="⌁" tint={palette.orange} />
+              <MetricCard title="Latest Score" value={latestScore ? `${Math.round(latestScore.dailyScore)}%` : "-"} subtitle="alignment" icon="◎" tint={palette.green} />
+              <MetricCard title="Core Score" value={latestScore ? `${Math.round(latestScore.coreScore)}%` : "-"} subtitle="duration + consistency" icon="◒" tint={palette.cyan} />
+              <MetricCard title="Phase" value={latestScore ? `${Math.round(latestScore.phaseScore)}%` : "-"} subtitle="midpoint match" icon="◌" tint={palette.indigo} />
+              <MetricCard title="Timing" value={latestScore ? `${Math.round(latestScore.timingScore)}%` : "-"} subtitle="bed/wake targets" icon="⌁" tint={palette.orange} />
             </MetricGrid>
             <TwilightButton title="Timing Timeline" subtle onPress={() => router.push("/modals/timing-sheet")} />
           </GlassPanel>

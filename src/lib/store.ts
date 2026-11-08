@@ -1,3 +1,4 @@
+import { syncHealth } from "./health/sync";
 import { create } from "zustand";
 
 import {
@@ -48,6 +49,7 @@ type AppStore = HydratedAppState & {
 async function afterDataMutation(set: (state: Partial<AppStore>) => void) {
   const next = await getHydratedState();
   set(next);
+  void syncHealth();
 }
 
 function setError(set: (state: Partial<AppStore>) => void, currentErrorMessage: string) {
@@ -84,6 +86,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const hydrated = await getHydratedState();
       set(hydrated);
+      void syncHealth();
     } catch (error) {
       set({
         ready: true,
@@ -120,8 +123,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   async updateSleepSettings(partial) {
     const sleepSettings = await setSleepSettings(partial);
-    await scheduleWindDownReminder(sleepSettings);
     set({ sleepSettings });
+    void syncHealth();
+    await scheduleWindDownReminder(sleepSettings);
   },
 
   async startSleepSession() {
@@ -167,13 +171,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       startTime: input.startTime ?? existing?.startTime ?? new Date().toISOString(),
       endTime: input.endTime ?? existing?.endTime ?? null,
       startTimeZoneIdentifier:
-        input.startTimeZoneIdentifier ??
-        existing?.startTimeZoneIdentifier ??
-        Intl.DateTimeFormat().resolvedOptions().timeZone,
+        input.startTimeZoneIdentifier !== undefined
+          ? input.startTimeZoneIdentifier
+          : existing ? existing.startTimeZoneIdentifier : Intl.DateTimeFormat().resolvedOptions().timeZone,
       endTimeZoneIdentifier:
-        input.endTimeZoneIdentifier ??
-        existing?.endTimeZoneIdentifier ??
-        Intl.DateTimeFormat().resolvedOptions().timeZone,
+        input.endTimeZoneIdentifier !== undefined
+          ? input.endTimeZoneIdentifier
+          : existing ? existing.endTimeZoneIdentifier : Intl.DateTimeFormat().resolvedOptions().timeZone,
       needsHealthKitSync: true,
       healthKitSyncVersion: existing?.healthKitSyncVersion ?? 2,
     };

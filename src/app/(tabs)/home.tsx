@@ -8,9 +8,17 @@ import {
   SleepAlignmentChart,
   WeeklySleepWindowChart,
 } from "@/charts";
+import {
+  AnalyticsSelector,
+  SleepRegularityCard,
+  SleepTimeCard,
+} from "@/charts/analytics";
 import { formatDuration, formatHours, formatSignedHours } from "@/lib/format";
 import {
   buildSleepMetrics,
+  clipSleepSeries,
+  sleepStreaks,
+  validCompletedSessions,
   getSleepGreeting,
   processWeeklySleepData,
 } from "@/lib/sleep";
@@ -22,7 +30,6 @@ import {
   MetricGrid,
   NativeScreen,
   SectionHeader,
-  SegmentedPills,
   TrendDelta,
   TwilightButton,
   chartPalette,
@@ -30,7 +37,7 @@ import {
 } from "@/ui/surface";
 
 const initialNow = Date.now();
-type HomeMode = "Week" | "7-Night Avg" | "Score" | "Core";
+type HomeMode = "Week" | "Trend" | "Time" | "SRI" | "Score" | "Core";
 type HistoryRange = "90D" | "All";
 
 function useNow(refreshIntervalMs: number) {
@@ -46,24 +53,11 @@ function useNow(refreshIntervalMs: number) {
   return now;
 }
 
-function computeStreak(dates: Date[]) {
-  if (dates.length === 0) return 0;
-  const sorted = dates
-    .map((date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime())
-    .sort((left, right) => right - left);
-  let streak = 1;
-  for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index - 1] - sorted[index] === 24 * 60 * 60 * 1000) {
-      streak += 1;
-    } else {
-      break;
-    }
-  }
-  return streak;
-}
-
 export default function HomeRoute() {
   const [viewMode, setViewMode] = useState<HomeMode>("Week");
+  const [trendWindow, setTrendWindow] = useState<"7-Night" | "Monthly">(
+    "7-Night",
+  );
   const [historyRange, setHistoryRange] = useState<HistoryRange>("90D");
   const [greetingSeed, setGreetingSeed] = useState(0);
   const sessions = useAppStore((state) => state.sessions);
@@ -86,38 +80,77 @@ export default function HomeRoute() {
   );
 
   const completedSessions = useMemo(
-    () => sessions.filter((s) => s.endTime),
+    () => validCompletedSessions(sessions),
     [sessions],
   );
 
   const metrics = useMemo(
-    () => buildSleepMetrics(completedSessions, sleepSettings.optimalSleepMinutes, sleepSettings.optimalWakeMinutes),
-    [completedSessions, sleepSettings.optimalSleepMinutes, sleepSettings.optimalWakeMinutes],
+    () =>
+      buildSleepMetrics(
+        completedSessions,
+        sleepSettings.optimalSleepMinutes,
+        sleepSettings.optimalWakeMinutes,
+      ),
+    [
+      completedSessions,
+      sleepSettings.optimalSleepMinutes,
+      sleepSettings.optimalWakeMinutes,
+    ],
   );
 
-  const weeklyData = useMemo(() => processWeeklySleepData(completedSessions), [completedSessions]);
-  const rangeRecords = historyRange === "90D" ? metrics.recordsInRange("90D") : metrics.recordsInRange("All");
-  const movingAverageSeries = metrics.movingAverageSeries(rangeRecords, 7);
-  const alignmentSeries = metrics.sleepAlignmentSeries(rangeRecords);
+  const weeklyData = useMemo(
+    () => processWeeklySleepData(completedSessions),
+    [completedSessions],
+  );
+  const rangeRecords =
+    historyRange === "90D"
+      ? metrics.recordsInRange("90D")
+      : metrics.recordsInRange("All");
+  const movingAverageSeries = clipSleepSeries(
+    metrics.movingAverageSeries(
+      metrics.records,
+      trendWindow === "Monthly" ? 30 : 7,
+    ),
+    rangeRecords,
+  );
+  const alignmentSeries = clipSleepSeries(
+    metrics.sleepAlignmentSeries(metrics.records),
+    rangeRecords,
+  );
 
   const isSleeping = !!activeSession;
   const activeDurationSeconds = activeSession
-    ? Math.max(0, Math.floor((now - new Date(activeSession.startTime).getTime()) / 1000))
+    ? Math.max(
+        0,
+        Math.floor((now - new Date(activeSession.startTime).getTime()) / 1000),
+      )
     : 0;
 
   const lastSleepSession = useMemo(
-    () => completedSessions.sort((left, right) => new Date(right.endTime!).getTime() - new Date(left.endTime!).getTime())[0],
+    () =>
+      completedSessions.sort(
+        (left, right) =>
+          new Date(right.endTime!).getTime() -
+          new Date(left.endTime!).getTime(),
+      )[0],
     [completedSessions],
   );
 
-  const currentStreak = computeStreak(metrics.records.map((record) => record.date));
-  const durationTrend = metrics.durationTrendPercent(metrics.recordsInRange("30D"));
+  const currentStreak = sleepStreaks(
+    metrics.records.map((record) => record.date),
+    new Date(now),
+  ).current;
+  const durationTrend = metrics.durationTrendPercent(
+    metrics.recordsInRange("30D"),
+  );
 
   const latestTracked = weeklyData.filter((item) => item.duration > 0).at(-1);
   const previousTracked = weeklyData.filter((item) => item.duration > 0).at(-2);
   const lastNightDelta =
     latestTracked && previousTracked
-      ? ((latestTracked.duration - previousTracked.duration) / Math.max(1, previousTracked.duration)) * 100
+      ? ((latestTracked.duration - previousTracked.duration) /
+          Math.max(1, previousTracked.duration)) *
+        100
       : null;
 
   const greeting = getSleepGreeting(
@@ -132,19 +165,23 @@ export default function HomeRoute() {
     <NativeScreen>
       <SectionHeader
         title={greeting}
-        subtitle={new Date(now).toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" })}
+        subtitle={new Date(now).toLocaleDateString([], {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })}
         trailing={
           <View style={{ flexDirection: "row", gap: 12 }}>
-            <Ionicons 
-              name="sparkles" 
-              size={24} 
-              color={theme.textSecondary} 
+            <Ionicons
+              name="sparkles"
+              size={24}
+              color={theme.textSecondary}
               onPress={() => setGreetingSeed((value) => value + 7_777)}
             />
-            <Ionicons 
-              name="information-circle-outline" 
-              size={24} 
-              color={theme.textSecondary} 
+            <Ionicons
+              name="information-circle-outline"
+              size={24}
+              color={theme.textSecondary}
               onPress={() => router.push("/modals/metrics-guide")}
             />
           </View>
@@ -152,25 +189,39 @@ export default function HomeRoute() {
       />
 
       <View style={{ gap: 10 }}>
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ gap: 8 }}>
           {viewMode !== "Week" ? (
             <TwilightButton
               title={historyRange}
               subtle
-              style={{ minHeight: 36, minWidth: 60, borderRadius: 13, paddingVertical: 8 }}
+              style={{
+                minHeight: 36,
+                minWidth: 60,
+                borderRadius: 13,
+                paddingVertical: 8,
+              }}
               textStyle={{ fontSize: 12 }}
-              onPress={() => setHistoryRange((value) => (value === "90D" ? "All" : "90D"))}
+              onPress={() =>
+                setHistoryRange((value) => (value === "90D" ? "All" : "90D"))
+              }
             />
           ) : null}
-          <View style={{ flex: 1 }}>
-            <SegmentedPills options={["Week", "7-Night Avg", "Score", "Core"]} value={viewMode} onChange={setViewMode} />
+          <View>
+            <AnalyticsSelector
+              options={["Week", "Trend", "Time", "SRI", "Score", "Core"]}
+              value={viewMode}
+              onChange={setViewMode}
+            />
           </View>
         </View>
 
         <GlassPanel padded={false} style={{ padding: 14 }}>
           {viewMode === "Week" ? (
             weeklyData.length === 0 ? (
-              <EmptyPanel title="Your sleep story starts tonight" subtitle="Log your first night to see your patterns here." />
+              <EmptyPanel
+                title="Your sleep story starts tonight"
+                subtitle="Log your first night to see your patterns here."
+              />
             ) : (
               <WeeklySleepWindowChart
                 data={weeklyData}
@@ -179,25 +230,73 @@ export default function HomeRoute() {
                 targetDurationHours={metrics.targetDurationHours}
               />
             )
-          ) : viewMode === "7-Night Avg" ? (
-            movingAverageSeries.filter((point) => point.movingAverageHours != null).length === 0 ? (
-              <EmptyPanel title="Track 7 nights" subtitle="A rolling trend appears once Twilight has enough completed sleep logs." />
-            ) : (
-              <View style={{ gap: 12 }}>
-                <SectionHeader title="7-Night Moving Average" subtitle="Bars are nightly sleep. Line smooths short-term noise." compact />
-                <DurationMomentumChart series={movingAverageSeries} targetHours={metrics.targetDurationHours} />
-              </View>
-            )
+          ) : viewMode === "Time" ? (
+            <SleepTimeCard metrics={metrics} records={rangeRecords} />
+          ) : viewMode === "SRI" ? (
+            <SleepRegularityCard metrics={metrics} range={historyRange} />
+          ) : viewMode === "Trend" ? (
+            <View style={{ gap: 12 }}>
+              <AnalyticsSelector
+                options={["7-Night", "Monthly"]}
+                value={trendWindow}
+                onChange={setTrendWindow}
+              />
+              {movingAverageSeries.filter(
+                (point) => point.movingAverageHours != null,
+              ).length === 0 ? (
+                <EmptyPanel
+                  title={
+                    trendWindow === "Monthly"
+                      ? "Track 30 nights"
+                      : "Track 7 nights"
+                  }
+                  subtitle="A rolling trend appears once Twilight has enough completed sleep logs."
+                />
+              ) : (
+                <View style={{ gap: 12 }}>
+                  <SectionHeader
+                    title={
+                      trendWindow === "Monthly"
+                        ? "Monthly Moving Average"
+                        : "7-Night Moving Average"
+                    }
+                    subtitle="Bars are nightly sleep. Line smooths short-term noise."
+                    compact
+                  />
+                  <DurationMomentumChart
+                    key={`${historyRange}-${trendWindow}`}
+                    window={trendWindow === "Monthly" ? 30 : 7}
+                    series={movingAverageSeries}
+                    targetHours={metrics.targetDurationHours}
+                  />
+                </View>
+              )}
+            </View>
           ) : alignmentSeries.length === 0 ? (
-            <EmptyPanel title="Score locked" subtitle="Track a completed night with a target bedtime and wake time to unlock your alignment trend." />
+            <EmptyPanel
+              title="Score locked"
+              subtitle="Track a completed night with a target bedtime and wake time to unlock your alignment trend."
+            />
           ) : (
             <View style={{ gap: 12 }}>
               <SectionHeader
-                title={viewMode === "Score" ? "Sleep Alignment Score" : "Core Sleep Score"}
-                subtitle={viewMode === "Score" ? "Duration, timing, phase, and consistency." : "A cleaner duration and consistency read."}
+                title={
+                  viewMode === "Score"
+                    ? "Sleep Alignment Score"
+                    : "Core Sleep Score"
+                }
+                subtitle={
+                  viewMode === "Score"
+                    ? "Duration, timing, phase, and consistency."
+                    : "A cleaner duration and consistency read."
+                }
                 compact
               />
-              <SleepAlignmentChart series={alignmentSeries} coreOnly={viewMode === "Core"} />
+              <SleepAlignmentChart
+                key={`${historyRange}-${viewMode}`}
+                series={alignmentSeries}
+                coreOnly={viewMode === "Core"}
+              />
             </View>
           )}
         </GlassPanel>
@@ -206,60 +305,187 @@ export default function HomeRoute() {
       <GlassPanel style={{ gap: 16 }}>
         {isSleeping && activeSession ? (
           <>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
               <View style={{ flex: 1 }}>
-                <Text selectable style={{ color: theme.textPrimary, fontSize: 22, fontWeight: "900" }}>
+                <Text
+                  selectable
+                  style={{
+                    color: theme.textPrimary,
+                    fontSize: 22,
+                    fontWeight: "900",
+                  }}
+                >
                   Sleep mode activated
                 </Text>
-                <Text selectable style={{ color: theme.textSecondary, marginTop: 3, fontSize: 13 }}>
+                <Text
+                  selectable
+                  style={{
+                    color: theme.textSecondary,
+                    marginTop: 3,
+                    fontSize: 13,
+                  }}
+                >
                   Dream Big!
                 </Text>
               </View>
-              <Text style={{ color: theme.accent, fontSize: 14, fontWeight: "900" }}>
+              <Text
+                style={{ color: theme.accent, fontSize: 14, fontWeight: "900" }}
+              >
                 {formatDuration(activeDurationSeconds)}
               </Text>
             </View>
-            <Text selectable style={{ color: theme.textPrimary, fontSize: 42, fontWeight: "900", fontVariant: ["tabular-nums"] }}>
+            <Text
+              selectable
+              style={{
+                color: theme.textPrimary,
+                fontSize: 42,
+                fontWeight: "900",
+                fontVariant: ["tabular-nums"],
+              }}
+            >
               {formatDuration(activeDurationSeconds)}
             </Text>
-            <TwilightButton title="Wake Up" onPress={() => void stopActiveSession()} />
-            <Text selectable style={{ color: theme.textSecondary, fontSize: 12, textAlign: "center" }}>
+            <TwilightButton
+              title="Wake Up"
+              onPress={() => void stopActiveSession()}
+            />
+            <Text
+              selectable
+              style={{
+                color: theme.textSecondary,
+                fontSize: 12,
+                textAlign: "center",
+              }}
+            >
               Stay rested. Your session is being tracked locally.
             </Text>
           </>
         ) : (
           <>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                gap: 12,
+                alignItems: "center",
+              }}
+            >
               <View style={{ flex: 1 }}>
-                <Text selectable style={{ color: theme.textPrimary, fontSize: 18, fontWeight: "900" }}>
+                <Text
+                  selectable
+                  style={{
+                    color: theme.textPrimary,
+                    fontSize: 18,
+                    fontWeight: "900",
+                  }}
+                >
                   {lastSleepSession ? "Last Night's Sleep" : "Start tonight!"}
                 </Text>
-                <Text selectable style={{ color: theme.textSecondary, marginTop: 3, fontSize: 13 }}>
-                  {lastSleepSession ? "Consistency compounds. Keep the rhythm." : "Track your first night to see insights."}
+                <Text
+                  selectable
+                  style={{
+                    color: theme.textSecondary,
+                    marginTop: 3,
+                    fontSize: 13,
+                  }}
+                >
+                  {lastSleepSession
+                    ? "Consistency compounds. Keep the rhythm."
+                    : "Track your first night to see insights."}
                 </Text>
               </View>
               {currentStreak > 0 ? (
-                <View style={{ borderRadius: 15, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: theme.glass }}>
-                  <Text style={{ color: theme.textPrimary, fontWeight: "900" }}>🔥 {currentStreak}</Text>
+                <View
+                  style={{
+                    borderRadius: 15,
+                    paddingHorizontal: 10,
+                    paddingVertical: 7,
+                    backgroundColor: theme.glass,
+                  }}
+                >
+                  <Text style={{ color: theme.textPrimary, fontWeight: "900" }}>
+                    🔥 {currentStreak}
+                  </Text>
                 </View>
               ) : null}
             </View>
             {lastSleepSession ? (
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-                <Text selectable style={{ color: theme.textPrimary, fontSize: 37, fontWeight: "900", fontVariant: ["tabular-nums"] }}>
-                  {formatDuration((new Date(lastSleepSession.endTime!).getTime() - new Date(lastSleepSession.startTime).getTime()) / 1000)}
+              <View
+                style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}
+              >
+                <Text
+                  selectable
+                  style={{
+                    color: theme.textPrimary,
+                    fontSize: 37,
+                    fontWeight: "900",
+                    fontVariant: ["tabular-nums"],
+                  }}
+                >
+                  {formatDuration(
+                    (new Date(lastSleepSession.endTime!).getTime() -
+                      new Date(lastSleepSession.startTime).getTime()) /
+                      1000,
+                  )}
                 </Text>
                 <TrendDelta value={lastNightDelta} />
               </View>
             ) : null}
             <MetricGrid>
-              <MetricCard title="30D avg" value={formatHours(metrics.averageDuration(metrics.recordsInRange("30D")) ?? 0)} subtitle="recent rhythm" icon="◒" tint={palette.green} />
-              <MetricCard title="vs target" value={formatSignedHours((metrics.averageDuration(metrics.recordsInRange("30D")) ?? 0) - metrics.targetDurationHours)} subtitle="sleep debt" icon="⌁" tint={palette.orange} />
-              <MetricCard title="trend" value={durationTrend == null ? "-" : `${Math.round(durationTrend)}%`} subtitle="last week" icon="↗" tint={palette.cyan} />
-              <MetricCard title="goal hit" value={`${metrics.goalHitRate(metrics.recordsInRange("30D"))}%`} subtitle="within 45m" icon="◎" tint={palette.pink} />
+              <MetricCard
+                title="30D avg"
+                value={formatHours(
+                  metrics.averageDuration(metrics.recordsInRange("30D")) ?? 0,
+                )}
+                subtitle="recent rhythm"
+                icon="◒"
+                tint={palette.green}
+              />
+              <MetricCard
+                title="vs target"
+                value={formatSignedHours(
+                  (metrics.averageDuration(metrics.recordsInRange("30D")) ??
+                    0) - metrics.targetDurationHours,
+                )}
+                subtitle="sleep debt"
+                icon="⌁"
+                tint={palette.orange}
+              />
+              <MetricCard
+                title="trend"
+                value={
+                  durationTrend == null ? "-" : `${Math.round(durationTrend)}%`
+                }
+                subtitle="last week"
+                icon="↗"
+                tint={palette.cyan}
+              />
+              <MetricCard
+                title="goal hit"
+                value={`${metrics.goalHitRate(metrics.recordsInRange("30D"))}%`}
+                subtitle="within 45m"
+                icon="◎"
+                tint={palette.pink}
+              />
             </MetricGrid>
-            <TwilightButton title="Go to Sleep" onPress={() => void startSleepSession()} />
-            <Text selectable style={{ color: theme.textSecondary, fontSize: 12, textAlign: "center" }}>
+            <TwilightButton
+              title="Go to Sleep"
+              onPress={() => void startSleepSession()}
+            />
+            <Text
+              selectable
+              style={{
+                color: theme.textSecondary,
+                fontSize: 12,
+                textAlign: "center",
+              }}
+            >
               Tap to start your sleep session when you head to bed.
             </Text>
           </>

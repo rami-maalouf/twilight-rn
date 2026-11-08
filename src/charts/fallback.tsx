@@ -154,7 +154,7 @@ export function WeeklySleepWindowChart({
   );
 }
 
-export function DurationMomentumChart({ series, targetHours }: { series: SleepMovingAveragePoint[]; targetHours: number }) {
+export function DurationMomentumChart({ series, targetHours }: { series: SleepMovingAveragePoint[]; targetHours: number; window?: number }) {
   const { theme } = useTwilightTheme();
   const palette = chartPalette(theme);
   const data = series
@@ -171,7 +171,7 @@ export function DurationMomentumChart({ series, targetHours }: { series: SleepMo
   );
 }
 
-export function MovingAverageChart(props: { series: SleepMovingAveragePoint[]; targetHours: number }) {
+export function MovingAverageChart(props: { series: SleepMovingAveragePoint[]; targetHours: number; window?: number }) {
   return <DurationMomentumChart {...props} />;
 }
 
@@ -398,7 +398,7 @@ function NativeTimeControl({
           display="compact"
           minuteInterval={5}
           accentColor={color}
-          onValueChange={(date) => {
+          onValueChange={(_event, date) => {
             if (date) onChange(minutesFromDate(date));
           }}
         />
@@ -424,7 +424,7 @@ function NativeTimeControl({
               mode="time"
               display="spinner"
               minuteInterval={5}
-              onValueChange={(date) => {
+              onValueChange={(_event, date) => {
                 if (date) onChange(minutesFromDate(date));
               }}
               onDismiss={() => setShowAndroidPicker(false)}

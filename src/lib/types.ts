@@ -12,6 +12,10 @@ export type SleepSession = {
   endTime: ISODateString | null;
   startTimeZoneIdentifier: string | null;
   endTimeZoneIdentifier: string | null;
+  healthProvenance?: import("./health/model").Provenance;
+  isHealthKitImported?: boolean;
+  healthKitExternalNightKey?: string | null;
+  healthKitSourceBundleIdentifier?: string | null;
   needsHealthKitSync: boolean;
   healthKitSyncVersion: number;
 };
@@ -126,6 +130,7 @@ export type SleepAlignmentScorePoint = {
   dailyScore: number;
   trendScore: number;
   coreScore: number;
+  coreTrendScore: number;
   durationScore: number;
   timingScore: number;
   phaseScore: number;

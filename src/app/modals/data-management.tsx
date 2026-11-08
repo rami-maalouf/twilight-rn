@@ -12,7 +12,7 @@ import { GlassPanel, NativeScreen, SectionHeader, TwilightButton, useTwilightThe
 async function shareTextFile(filename: string, contents: string) {
   const file = new File(Paths.cache, filename);
   file.create({ intermediates: true, overwrite: true });
-  file.write(contents);
+  await file.write(contents);
   if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(file.uri);
   }

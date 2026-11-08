@@ -1,15 +1,17 @@
 import "../global.css";
+import { syncHealth } from "@/lib/health/sync";
 
 import { Ionicons } from "@expo/vector-icons";
 import * as SystemUI from "expo-system-ui";
 import { Stack } from "expo-router";
 import { useEffect } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { AppState, Appearance, useColorScheme, ActivityIndicator, Pressable, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { enableScreens } from "react-native-screens";
 
 import { getTheme } from "@/lib/theme";
 import { useAppStore } from "@/lib/store";
+import { WidgetLifecycle } from "@/widgets/widget-lifecycle";
 
 enableScreens(true);
 
@@ -19,7 +21,11 @@ function RootContent() {
   const appearance = useAppStore((state) => state.appearance);
   const currentErrorMessage = useAppStore((state) => state.currentErrorMessage);
   const clearError = useAppStore((state) => state.clearError);
-  const theme = getTheme(appearance);
+  const theme = getTheme(appearance, useColorScheme());
+
+  useEffect(() => {
+    Appearance.setColorScheme(appearance.themeMode === "System" ? "unspecified" : appearance.themeMode === "Sunset" ? "light" : "dark");
+  }, [appearance.themeMode]);
 
   useEffect(() => {
     void hydrate();
@@ -28,6 +34,14 @@ function RootContent() {
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(theme.backgroundStart).catch(() => undefined);
   }, [theme.backgroundStart]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void syncHealth().then(() => useAppStore.getState().refresh());
+    });
+    return () => sub.remove();
+  }, [ready]);
 
   if (!ready) {
     return (
@@ -58,6 +72,7 @@ function RootContent() {
         <Stack.Screen name="modals/timing-sheet" options={{ presentation: "modal" }} />
         <Stack.Screen name="modals/support" options={{ presentation: "modal" }} />
         <Stack.Screen name="modals/data-management" options={{ presentation: "modal" }} />
+        <Stack.Screen name="modals/health-connect" options={{ presentation: "modal" }} />
       </Stack>
 
       {currentErrorMessage ? (
@@ -90,6 +105,7 @@ export default function Layout() {
   return (
     <SafeAreaProvider>
       <RootContent />
+      <WidgetLifecycle />
     </SafeAreaProvider>
   );
 }

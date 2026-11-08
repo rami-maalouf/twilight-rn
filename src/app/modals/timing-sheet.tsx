@@ -1,10 +1,10 @@
 import { router } from "expo-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Text } from "react-native";
 
 import { TimingTimelineChart } from "@/charts";
 import { formatClock } from "@/lib/format";
-import { buildSleepMetrics } from "@/lib/sleep";
+import { buildSleepMetrics, validCompletedSessions } from "@/lib/sleep";
 import { useAppStore } from "@/lib/store";
 import {
   EmptyPanel,
@@ -18,14 +18,18 @@ import {
   useTwilightTheme,
 } from "@/ui/surface";
 
+import type { SleepMetricsRange } from "@/lib/types";
+import { AnalyticsSelector, SleepTimeCard } from "@/charts/analytics";
+
 export default function TimingSheetModal() {
+  const [range, setRange] = useState<SleepMetricsRange>("90D");
   const sessions = useAppStore((state) => state.sessions);
   const sleepSettings = useAppStore((state) => state.sleepSettings);
   const { theme } = useTwilightTheme();
   const palette = chartPalette(theme);
 
   const completedSessions = useMemo(
-    () => sessions.filter((session) => session.endTime),
+    () => validCompletedSessions(sessions),
     [sessions],
   );
   
@@ -33,7 +37,7 @@ export default function TimingSheetModal() {
     () => buildSleepMetrics(completedSessions, sleepSettings.optimalSleepMinutes, sleepSettings.optimalWakeMinutes),
     [completedSessions, sleepSettings.optimalSleepMinutes, sleepSettings.optimalWakeMinutes],
   );
-  const records = metrics.recordsInRange("90D");
+  const records = metrics.recordsInRange(range);
   const timeline = metrics.timingTimelineSeries(records);
   const socialJetlag = metrics.socialJetlag(records);
 
@@ -41,12 +45,14 @@ export default function TimingSheetModal() {
     <NativeScreen>
       <SectionHeader title="Timing Timeline" subtitle="How Twilight interprets bedtime, wake time, midpoint, and wake-day semantics." />
 
+      <AnalyticsSelector options={["30D", "90D", "1Y", "All"]} value={range} onChange={setRange} />
       {timeline.length === 0 ? (
         <EmptyPanel title="No timing data yet" subtitle="Complete sleep logs to unlock the timing timeline." />
       ) : (
         <>
           <GlassPanel style={{ gap: 12 }}>
             <SectionHeader title="Bedtime Trend" subtitle="Offsets are normalized from 6 PM so overnight sleep windows remain continuous." compact />
+            <SleepTimeCard metrics={metrics} records={records} />
             <TimingTimelineChart series={timeline} />
           </GlassPanel>
 
@@ -56,7 +62,7 @@ export default function TimingSheetModal() {
               <MetricCard title="Target Bed" value={formatClock(sleepSettings.optimalSleepMinutes)} subtitle="configured" icon="☾" tint={palette.indigo} />
               <MetricCard title="Target Wake" value={formatClock(sleepSettings.optimalWakeMinutes)} subtitle="configured" icon="☀" tint={palette.orange} />
               <MetricCard title="Social Jetlag" value={socialJetlag.deltaHours == null ? "-" : `${Math.abs(socialJetlag.deltaHours).toFixed(1)}h`} subtitle="weekday/weekend midpoint" icon="⇄" tint={palette.pink} />
-              <MetricCard title="Nights" value={`${records.length}`} subtitle="90-day timing sample" icon="◎" tint={palette.green} />
+              <MetricCard title="Nights" value={`${records.length}`} subtitle={`${range} timing sample`} icon="◎" tint={palette.green} />
             </MetricGrid>
           </GlassPanel>
         </>
